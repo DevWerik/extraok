@@ -1,0 +1,22 @@
+{
+  "name": "extraok",
+  "private": true,
+  "packageManager": "pnpm@11.10.0",
+  "engines": {
+    "node": ">=24.19 <25"
+  },
+  "scripts": {
+    "dev": "pnpm -r --parallel dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r --if-present lint",
+    "test": "pnpm -r --if-present test",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "db:generate": "pnpm --filter @extraok/api prisma:generate",
+    "db:local:create": "pnpm --dir apps/api exec prisma dev --detach --name extraok",
+    "db:local:start": "pnpm --dir apps/api exec prisma dev start extraok",
+    "db:local:stop": "pnpm --dir apps/api exec prisma dev stop extraok",
+    "db:studio": "pnpm --filter @extraok/api prisma:studio",
+    "db:migrate:dev": "pnpm --filter @extraok/api prisma:migrate:dev",
+    "db:migrate:deploy": "pnpm --filter @extraok/api prisma:migrate:deploy"
+  }
+}
