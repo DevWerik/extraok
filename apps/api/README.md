@@ -6,6 +6,7 @@ API HTTP do ExtraOK construída com Fastify, TypeScript, Prisma e PostgreSQL. A 
 
 Copie `.env.example` para `.env` neste diretório. As variáveis obrigatórias são:
 
+- `NODE_ENV`: modo explícito de execução (`development`, `test` ou `production`).
 - `DATABASE_URL`: conexão PostgreSQL.
 - `WEB_ORIGIN`: origem exata permitida pelo CORS e pela proteção de requisições mutáveis.
 - `PASSWORD_PEPPER`: segredo aleatório com pelo menos 32 caracteres.

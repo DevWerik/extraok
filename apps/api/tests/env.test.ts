@@ -4,12 +4,13 @@ import test from "node:test";
 import { loadEnv } from "../src/config/env.js";
 
 const requiredEnvironment = {
+  NODE_ENV: "development",
   DATABASE_URL: "postgresql://extraok:secret@localhost:5432/extraok",
   WEB_ORIGIN: "https://app.extraok.com.br/",
   PASSWORD_PEPPER: "p".repeat(32),
 };
 
-test("loadEnv aplica defaults e normaliza a origem web", () => {
+test("loadEnv preserva o modo explicito, aplica defaults e normaliza a origem", () => {
   const environment = loadEnv(requiredEnvironment);
 
   assert.equal(environment.NODE_ENV, "development");
@@ -20,6 +21,25 @@ test("loadEnv aplica defaults e normaliza a origem web", () => {
   assert.equal(environment.SESSION_IDLE_HOURS, 12);
   assert.equal(environment.APPROVAL_LINK_TTL_DAYS, 30);
   assert.equal(environment.TRUST_PROXY, false);
+});
+
+test("loadEnv exige um NODE_ENV explicito e valido", () => {
+  assert.throws(
+    () => loadEnv({ ...requiredEnvironment, NODE_ENV: undefined }),
+    (error: unknown) =>
+      error instanceof Error && error.message.includes("NODE_ENV"),
+  );
+
+  assert.throws(
+    () => loadEnv({ ...requiredEnvironment, NODE_ENV: "staging" }),
+    (error: unknown) =>
+      error instanceof Error && error.message.includes("NODE_ENV"),
+  );
+
+  assert.equal(
+    loadEnv({ ...requiredEnvironment, NODE_ENV: "test" }).NODE_ENV,
+    "test",
+  );
 });
 
 test("loadEnv converte numeros e booleanos vindos do processo", () => {

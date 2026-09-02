@@ -29,7 +29,9 @@ Crie o ambiente da API:
 Copy-Item apps/api/.env.example apps/api/.env
 ```
 
-Edite `apps/api/.env` e informe um PostgreSQL acessível em `DATABASE_URL`. Gere um pepper independente com:
+Edite `apps/api/.env` e informe um PostgreSQL acessível em `DATABASE_URL`. Se
+ainda não tiver um, execute primeiro `pnpm db:local:create` e copie a URL
+exibida pelo comando. Gere um pepper independente com:
 
 ```bash
 node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
@@ -45,10 +47,8 @@ pnpm db:migrate:dev
 pnpm dev
 ```
 
-Sem Docker/PostgreSQL instalado, crie o banco local efêmero uma vez com
-`pnpm db:local:create`. Depois, ele pode ser religado com
-`pnpm db:local:start` e encerrado com `pnpm db:local:stop`. Copie a
-`DATABASE_URL` exibida na criação para `apps/api/.env`.
+O banco local efêmero criado por `pnpm db:local:create` pode ser religado com
+`pnpm db:local:start` e encerrado com `pnpm db:local:stop`.
 
 O frontend fica em `http://localhost:5173`, a API em `http://localhost:3333` e o Vite encaminha `/api` para a API. Não use `prisma migrate dev` em produção.
 

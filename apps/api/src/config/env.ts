@@ -43,9 +43,7 @@ const DEVELOPMENT_ONLY_PEPPERS = new Set([
 
 export const envSchema = z
   .object({
-    NODE_ENV: z
-      .enum(["development", "test", "production"])
-      .default("development"),
+    NODE_ENV: z.enum(["development", "test", "production"]),
     DATABASE_URL: postgresUrlSchema,
     HOST: z.string().trim().min(1).default("0.0.0.0"),
     PORT: z.coerce.number().int().min(1).max(65_535).default(3333),
