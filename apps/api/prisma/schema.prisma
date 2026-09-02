@@ -1,0 +1,127 @@
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
+  importFileExtension = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum JobStatus {
+  scheduled   @map("scheduled")
+  in_progress @map("in_progress")
+  completed   @map("completed")
+  cancelled   @map("cancelled")
+
+  @@map("job_status")
+}
+
+enum ExtraStatus {
+  pending  @map("pending")
+  approved @map("approved")
+  rejected @map("rejected")
+
+  @@map("extra_status")
+}
+
+model User {
+  id              String    @id @default(uuid()) @db.Uuid
+  name            String    @db.VarChar(120)
+  businessName    String    @map("business_name") @db.VarChar(160)
+  email           String    @unique(map: "users_email_key") @db.VarChar(320)
+  phone           String    @db.VarChar(32)
+  passwordHash    String    @map("password_hash") @db.VarChar(255)
+  termsVersion    String    @map("terms_version") @db.VarChar(32)
+  termsAcceptedAt DateTime  @map("terms_accepted_at") @db.Timestamptz(3)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  sessions        Session[]
+  clients         Client[]
+  jobs            Job[]
+
+  @@map("users")
+}
+
+model Session {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  tokenHash  String    @unique(map: "sessions_token_hash_key") @map("token_hash") @db.Char(64)
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(3)
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(3)
+  lastUsedAt DateTime  @default(now()) @map("last_used_at") @db.Timestamptz(3)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt], map: "sessions_user_id_expires_at_idx")
+  @@index([expiresAt], map: "sessions_expires_at_idx")
+  @@map("sessions")
+}
+
+model Client {
+  id        String   @id @default(uuid()) @db.Uuid
+  ownerId   String   @map("owner_id") @db.Uuid
+  name      String   @db.VarChar(160)
+  phone     String   @db.VarChar(32)
+  email     String   @db.VarChar(320)
+  notes     String   @default("") @db.VarChar(500)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  owner     User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  jobs      Job[]
+
+  @@index([ownerId, name], map: "clients_owner_id_name_idx")
+  @@map("clients")
+}
+
+model Job {
+  id            String         @id @default(uuid()) @db.Uuid
+  ownerId       String         @map("owner_id") @db.Uuid
+  clientId      String         @map("client_id") @db.Uuid
+  title         String         @db.VarChar(180)
+  description   String         @db.Text
+  scheduledAt   DateTime       @map("scheduled_at") @db.Timestamptz(3)
+  status        JobStatus      @default(scheduled)
+  createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
+  owner         User           @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  client        Client         @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  extras        Extra[]
+  approvalLinks ApprovalLink[]
+
+  @@index([ownerId, scheduledAt], map: "jobs_owner_id_scheduled_at_idx")
+  @@index([ownerId, status], map: "jobs_owner_id_status_idx")
+  @@index([clientId], map: "jobs_client_id_idx")
+  @@map("jobs")
+}
+
+model Extra {
+  id          String      @id @default(uuid()) @db.Uuid
+  jobId       String      @map("job_id") @db.Uuid
+  title       String      @db.VarChar(180)
+  description String      @db.Text
+  priceCents  Int         @map("price_cents")
+  status      ExtraStatus @default(pending)
+  respondedAt DateTime?   @map("responded_at") @db.Timestamptz(3)
+  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
+  job         Job         @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId, createdAt], map: "extras_job_id_created_at_idx")
+  @@map("extras")
+}
+
+model ApprovalLink {
+  id        String    @id @default(uuid()) @db.Uuid
+  jobId     String    @map("job_id") @db.Uuid
+  tokenHash String    @unique(map: "approval_links_token_hash_key") @map("token_hash") @db.Char(64)
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(3)
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz(3)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  job       Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId, createdAt], map: "approval_links_job_id_created_at_idx")
+  @@index([expiresAt], map: "approval_links_expires_at_idx")
+  @@map("approval_links")
+}
