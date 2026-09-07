@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b --pretty false",
+    "test": "node --test tests/*.test.ts",
     "lint": "eslint . --max-warnings=0",
+    "deploy": "pnpm build && wrangler deploy",
     "preview": "vite preview"
   },
   "dependencies": {

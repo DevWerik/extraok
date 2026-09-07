@@ -3,3 +3,9 @@ src/generated/prisma/
 .env
 .env.*
 !.env.example
+
+# Skills instaladas localmente para assistentes de desenvolvimento.
+/.agents/skills/
+/.claude/skills/
+/.windsurf/skills/
+/skills-lock.json

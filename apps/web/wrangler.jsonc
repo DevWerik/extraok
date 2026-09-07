@@ -1,9 +1,15 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "extraok-web",
+  "main": "worker/index.ts",
   "compatibility_date": "2026-09-03",
+  "vars": {
+    "API_ORIGIN": "https://extraok-api.onrender.com"
+  },
   "assets": {
     "directory": "./dist",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api", "/api/*", "/health", "/ready"],
     "not_found_handling": "single-page-application"
   }
 }
