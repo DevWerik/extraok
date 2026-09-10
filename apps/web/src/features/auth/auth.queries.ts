@@ -41,3 +41,30 @@ export function useSignOut() {
     },
   })
 }
+
+export function useRequestPasswordReset() {
+  return useMutation({ mutationFn: authService.requestPasswordReset, retry: false, gcTime: 0 })
+}
+
+export function useVerifyPasswordReset() {
+  return useMutation({ mutationFn: authService.verifyPasswordReset, retry: false, gcTime: 0 })
+}
+
+export function useConfirmPasswordReset() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: authService.confirmPasswordReset,
+    retry: false,
+    gcTime: 0,
+    onSuccess: async () => {
+      await queryClient.cancelQueries()
+      queryClient.clear()
+      queryClient.setQueryData(queryKeys.auth.session, null)
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.auth.session,
+        exact: true,
+        refetchType: 'none',
+      })
+    },
+  })
+}

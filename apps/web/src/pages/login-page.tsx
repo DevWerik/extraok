@@ -1,7 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { ArrowRight, Mail } from 'lucide-react'
 import { useForm } from 'react-hook-form'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { AuthLayout } from '@/components/layout/auth-layout'
 import { Button } from '@/components/ui/button'
@@ -72,6 +72,9 @@ export function LoginPage() {
       alternateLinkTo="/cadastro"
     >
       <form className="space-y-5" onSubmit={handleSubmit(onSubmit)} noValidate>
+        {searchParams.get('passwordReset') === 'success' && (
+          <FormFeedback tone="success" message="Senha alterada com sucesso. Entre com sua nova senha." />
+        )}
         <div className="space-y-2">
           <Label htmlFor="login-email">E-mail</Label>
           <div className="relative">
@@ -81,6 +84,11 @@ export function LoginPage() {
           {errors.email && <p className="text-sm text-destructive">{errors.email.message}</p>}
         </div>
         <PasswordField id="login-password" label="Senha" autoComplete="current-password" registration={register('password')} error={errors.password?.message} />
+        <div className="text-right">
+          <Link to="/recuperar-senha" className="inline-flex min-h-10 items-center rounded-sm text-sm font-semibold text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            Esqueci minha senha
+          </Link>
+        </div>
         {signIn.isError && <FormFeedback tone="error" message={isServiceError(signIn.error) ? signIn.error.message : 'Não foi possível entrar na sua conta.'} />}
         <Button type="submit" size="lg" className="w-full" disabled={signIn.isPending}>
           {signIn.isPending ? 'Entrando...' : 'Entrar'}

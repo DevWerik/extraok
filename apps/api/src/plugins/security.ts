@@ -36,6 +36,7 @@ export async function configureSecurity(
     max: 300,
     timeWindow: "1 minute",
     errorResponseBuilder: () => ({
+      statusCode: 429,
       error: {
         code: "RATE_LIMITED",
         message: "Muitas tentativas. Aguarde e tente novamente.",

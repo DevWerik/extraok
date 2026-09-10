@@ -19,6 +19,7 @@ Por padrão, o Vite encaminha `/api` para `http://127.0.0.1:3333`. Consulte `.en
 
 - `/` — página institucional
 - `/login` e `/cadastro` — criação de conta e autenticação por sessão
+- `/recuperar-senha` — recuperação com código por e-mail e cadastro de nova senha
 - `/dashboard` — visão geral do negócio
 - `/clientes` — consulta e cadastro de clientes
 - `/atendimentos` — listagem de atendimentos
@@ -65,6 +66,8 @@ Depois da publicação, abra no domínio do **frontend**:
 - `/api/v1/auth/session`: sem login, HTTP 401 com JSON é esperado; HTML indica que o proxy não entrou em funcionamento.
 
 Teste cadastro, login, recarregamento mantendo a sessão e logout. Testes locais: `pnpm --filter @extraok/web test`.
+
+A recuperação de senha usa o mesmo proxy e exige a ativação do envio na API. Configure o Resend apenas no backend, seguindo o [guia da API](../api/README.md#recuperação-de-senha-por-e-mail). O código e a nova senha ficam somente na memória da tela durante o fluxo; a autorização temporária usa cookie HttpOnly. Recarregar a página reinicia o formulário. Após a troca, todas as sessões anteriores são encerradas e o usuário volta ao login.
 
 `run_worker_first` prioriza o Worker para `/api`, `/api/*`, `/health` e `/ready`. Veja [assets e bindings do Cloudflare](https://developers.cloudflare.com/workers/static-assets/binding/).
 

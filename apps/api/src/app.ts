@@ -5,6 +5,8 @@ import { createPrismaClient } from "./db/prisma.js";
 import { registerErrorHandler } from "./http/error-handler.js";
 import { registerApprovalRoutes } from "./modules/approvals/routes.js";
 import { registerAuthRoutes } from "./modules/auth/routes.js";
+import { registerPasswordResetRoutes } from "./modules/auth/password-reset-routes.js";
+import { createPasswordResetMailer, type PasswordResetMailer } from "./lib/password-reset-mailer.js";
 import { registerClientRoutes } from "./modules/clients/routes.js";
 import { registerDashboardRoutes } from "./modules/dashboard/routes.js";
 import { registerExtraRoutes } from "./modules/extras/routes.js";
@@ -16,6 +18,8 @@ export interface BuildAppOptions {
   env?: Env;
   prisma?: PrismaClient;
   logger?: boolean;
+  passwordResetMailer?: PasswordResetMailer;
+  passwordResetDeliveryEnabled?: boolean;
 }
 
 export async function buildApp(
@@ -40,6 +44,11 @@ export async function buildApp(
             "req.headers.cookie",
             "res.headers.set-cookie",
             "req.body.password",
+            "req.body.confirmPassword",
+            "req.body.newPassword",
+            "req.body.code",
+            "req.body.otp",
+            "req.body.resetToken",
             "req.params.token",
           ],
           censor: "[REDACTED]",
@@ -78,9 +87,22 @@ export async function buildApp(
     }
   });
 
+  // Close hooks run in reverse registration order. The delivery worker must
+  // finish before its Prisma connection is disconnected.
+  if (ownsPrisma) {
+    app.addHook("onClose", async () => {
+      await prisma.$disconnect();
+    });
+  }
+
   await app.register(
     async (api) => {
       await registerAuthRoutes(api);
+      await registerPasswordResetRoutes(
+        api,
+        options.passwordResetMailer ?? createPasswordResetMailer(env),
+        { deliveryEnabled: options.passwordResetDeliveryEnabled },
+      );
       await registerClientRoutes(api);
       await registerJobRoutes(api);
       await registerExtraRoutes(api);
@@ -89,12 +111,6 @@ export async function buildApp(
     },
     { prefix: "/api/v1" },
   );
-
-  if (ownsPrisma) {
-    app.addHook("onClose", async () => {
-      await prisma.$disconnect();
-    });
-  }
 
   return app;
 }

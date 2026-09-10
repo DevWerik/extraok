@@ -25,6 +25,30 @@ export interface SignUpInput {
   acceptTerms: boolean
 }
 
+export interface PasswordResetRequestInput {
+  email: string
+}
+
+export interface PasswordResetRequestResult {
+  message: string
+  retryAfterSeconds: number
+  expiresInSeconds: number
+  codeLength: number
+}
+
+export interface PasswordResetVerifyInput extends PasswordResetRequestInput {
+  code: string
+}
+
+export interface PasswordResetVerifyResult {
+  expiresInSeconds: number
+}
+
+export interface PasswordResetConfirmInput {
+  password: string
+  confirmPassword: string
+}
+
 export interface ClientFilters {
   search?: string
 }
@@ -137,6 +161,9 @@ export interface AuthService {
   signIn(input: SignInInput): Promise<Session>
   signUp(input: SignUpInput): Promise<Session>
   signOut(): Promise<void>
+  requestPasswordReset(input: PasswordResetRequestInput): Promise<PasswordResetRequestResult>
+  verifyPasswordReset(input: PasswordResetVerifyInput): Promise<PasswordResetVerifyResult>
+  confirmPasswordReset(input: PasswordResetConfirmInput): Promise<void>
 }
 
 export interface ClientsService {

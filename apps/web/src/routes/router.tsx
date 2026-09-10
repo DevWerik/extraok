@@ -34,6 +34,14 @@ export const router = createBrowserRouter([
     ],
   },
   {
+    path: '/recuperar-senha',
+    lazy: async () => {
+      const { PasswordResetPage } = await import('@/pages/password-reset-page')
+      return { Component: PasswordResetPage }
+    },
+    errorElement: <RouteError />,
+  },
+  {
     path: '/aprovar/:token',
     lazy: async () => {
       const { ApprovalPage } = await import('@/pages/approval-page')

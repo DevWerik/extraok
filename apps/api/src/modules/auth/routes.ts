@@ -43,15 +43,22 @@ function expiresFromNow(days: number): Date {
 async function createSession(
   app: FastifyInstance,
   userId: string,
+  expectedPasswordHash: string,
 ): Promise<{ token: string; expiresAt: Date; issuedAt: Date }> {
   const token = createOpaqueToken();
   const expiresAt = expiresFromNow(app.env.SESSION_TTL_DAYS);
-  const session = await app.prisma.session.create({
-    data: {
-      userId,
-      tokenHash: hashToken(token),
-      expiresAt,
-    },
+  const session = await app.prisma.$transaction(async (transaction) => {
+    // Serialize with password reset: a login that verified an old password must
+    // not create a fresh session after the reset has revoked existing sessions.
+    const users = await transaction.$queryRaw<Array<{ password_hash: string }>>`
+      SELECT password_hash FROM users WHERE id = ${userId}::uuid FOR UPDATE
+    `;
+    if (users[0]?.password_hash !== expectedPasswordHash) {
+      throw unauthorized("E-mail ou senha inválidos.");
+    }
+    return transaction.session.create({
+      data: { userId, tokenHash: hashToken(token), expiresAt },
+    });
   });
 
   return { token, expiresAt, issuedAt: session.createdAt };
@@ -137,7 +144,7 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
         throw unauthorized("E-mail ou senha inválidos.");
       }
 
-      const session = await createSession(app, user.id);
+      const session = await createSession(app, user.id, user.passwordHash);
       setSessionCookie(reply, app.env, session.token, session.expiresAt);
 
       return {

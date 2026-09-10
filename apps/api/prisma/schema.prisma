@@ -40,8 +40,80 @@ model User {
   sessions        Session[]
   clients         Client[]
   jobs            Job[]
+  passwordResetState      PasswordResetState?
+  passwordResetChallenges PasswordResetChallenge[]
+  passwordResetGrants     PasswordResetGrant[]
+  passwordResetDeliveries PasswordResetDelivery[]
 
   @@map("users")
+}
+
+model PasswordResetState {
+  userId               String    @id @map("user_id") @db.Uuid
+  failedAttempts       Int       @default(0) @map("failed_attempts")
+  failureWindowStart   DateTime? @map("failure_window_start") @db.Timestamptz(3)
+  user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("password_reset_states")
+}
+
+model PasswordResetChallenge {
+  id            String    @id @default(uuid()) @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  codeHash      String    @map("code_hash") @db.Char(64)
+  attempts      Int       @default(0)
+  expiresAt     DateTime  @map("expires_at") @db.Timestamptz(3)
+  verifiedAt    DateTime? @map("verified_at") @db.Timestamptz(3)
+  invalidatedAt DateTime? @map("invalidated_at") @db.Timestamptz(3)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  grant         PasswordResetGrant?
+  delivery      PasswordResetDelivery?
+
+  @@index([userId, createdAt], map: "password_reset_challenges_user_created_idx")
+  @@index([expiresAt], map: "password_reset_challenges_expiry_idx")
+  @@map("password_reset_challenges")
+}
+
+model PasswordResetGrant {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  challengeId String    @unique(map: "password_reset_grants_challenge_key") @map("challenge_id") @db.Uuid
+  tokenHash   String    @unique(map: "password_reset_grants_token_key") @map("token_hash") @db.Char(64)
+  expiresAt   DateTime  @map("expires_at") @db.Timestamptz(3)
+  usedAt      DateTime? @map("used_at") @db.Timestamptz(3)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  challenge   PasswordResetChallenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+
+  @@index([userId], map: "password_reset_grants_user_idx")
+  @@map("password_reset_grants")
+}
+
+enum PasswordResetDeliveryKind {
+  code
+  changed
+
+  @@map("password_reset_delivery_kind")
+}
+
+model PasswordResetDelivery {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  challengeId String?   @unique(map: "password_reset_deliveries_challenge_key") @map("challenge_id") @db.Uuid
+  kind        PasswordResetDeliveryKind
+  ciphertext  String?   @db.Text
+  attempts    Int       @default(0)
+  availableAt DateTime  @default(now()) @map("available_at") @db.Timestamptz(3)
+  expiresAt   DateTime  @map("expires_at") @db.Timestamptz(3)
+  finishedAt  DateTime? @map("finished_at") @db.Timestamptz(3)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  challenge   PasswordResetChallenge? @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+
+  @@index([finishedAt, availableAt], map: "password_reset_deliveries_pending_idx")
+  @@index([userId], map: "password_reset_deliveries_user_idx")
+  @@map("password_reset_deliveries")
 }
 
 model Session {

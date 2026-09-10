@@ -34,3 +34,25 @@ export const signupSchema = z
 
 export type LoginFormData = z.infer<typeof loginSchema>
 export type SignupFormData = z.infer<typeof signupSchema>
+
+export const passwordResetRequestSchema = z.object({
+  email: emailSchema.transform((email) => email.toLowerCase()),
+})
+
+export const passwordResetCodeSchema = z.object({
+  code: z.string().regex(/^\d{8}$/, "Informe os 8 dígitos do código."),
+})
+
+export const passwordResetConfirmSchema = z
+  .object({
+    password: newPasswordSchema,
+    confirmPassword: z.string(),
+  })
+  .refine((values) => values.password === values.confirmPassword, {
+    message: "As senhas precisam ser iguais.",
+    path: ["confirmPassword"],
+  })
+
+export type PasswordResetRequestFormData = z.infer<typeof passwordResetRequestSchema>
+export type PasswordResetCodeFormData = z.infer<typeof passwordResetCodeSchema>
+export type PasswordResetConfirmFormData = z.infer<typeof passwordResetConfirmSchema>

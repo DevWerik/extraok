@@ -21,6 +21,7 @@ test("loadEnv preserva o modo explicito, aplica defaults e normaliza a origem", 
   assert.equal(environment.SESSION_IDLE_HOURS, 12);
   assert.equal(environment.APPROVAL_LINK_TTL_DAYS, 30);
   assert.equal(environment.TRUST_PROXY, false);
+  assert.equal(environment.PASSWORD_RESET_ENABLED, false);
 });
 
 test("loadEnv exige um NODE_ENV explicito e valido", () => {
@@ -95,4 +96,43 @@ test("loadEnv rejeita o pepper local conhecido em producao", () => {
         "extraok-local-development-pepper-do-not-use-in-production",
     }),
   );
+});
+
+test("recuperação desativada aceita campos opcionais vazios", () => {
+  const environment = loadEnv({
+    ...requiredEnvironment,
+    PASSWORD_RESET_ENABLED: "false",
+    RESEND_API_KEY: "",
+    EMAIL_FROM: " ",
+    PASSWORD_RESET_OTP_SECRET: "",
+  });
+  assert.equal(environment.RESEND_API_KEY, undefined);
+  assert.equal(environment.EMAIL_FROM, undefined);
+  assert.equal(environment.PASSWORD_RESET_OTP_SECRET, undefined);
+});
+
+const recoveryEnvironment = {
+  ...requiredEnvironment,
+  PASSWORD_RESET_ENABLED: "true",
+  RESEND_API_KEY: "re_test_fake_key_only",
+  EMAIL_FROM: "ExtraOK <security@example.test>",
+  PASSWORD_RESET_OTP_SECRET: "s".repeat(64),
+};
+
+test("ativação da recuperação exige todas as configurações válidas", () => {
+  assert.equal(loadEnv(recoveryEnvironment).PASSWORD_RESET_ENABLED, true);
+  for (const setting of ["RESEND_API_KEY", "EMAIL_FROM", "PASSWORD_RESET_OTP_SECRET"]) {
+    assert.throws(() => loadEnv({ ...recoveryEnvironment, [setting]: "" }));
+  }
+  assert.throws(() => loadEnv({ ...recoveryEnvironment, PASSWORD_RESET_OTP_SECRET: requiredEnvironment.PASSWORD_PEPPER }));
+  assert.throws(() => loadEnv({ ...recoveryEnvironment, PASSWORD_RESET_OTP_SECRET: "short" }));
+  assert.throws(() => loadEnv({ ...recoveryEnvironment, RESEND_API_KEY: "invalid" }));
+  assert.throws(() => loadEnv({ ...recoveryEnvironment, PASSWORD_RESET_ENABLED: "yes" }));
+});
+
+test("remetente aceita endereço simples e rejeita cabeçalhos injetados", () => {
+  assert.equal(loadEnv({ ...recoveryEnvironment, EMAIL_FROM: "security@example.test" }).EMAIL_FROM, "security@example.test");
+  for (const email of ["invalid", "ExtraOK <invalid>", "ExtraOK <ok@example.test>\r\nBcc: attacker@example.test", "ExtraOK <ok@example.test> trailing"]) {
+    assert.throws(() => loadEnv({ ...recoveryEnvironment, EMAIL_FROM: email }));
+  }
 });

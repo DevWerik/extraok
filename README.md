@@ -121,7 +121,7 @@ Antes de liberar acesso público:
 - fixe imagens por digest no ambiente de deploy e defina limites de CPU, memória e processos após medir a carga real;
 - publique termos e política de privacidade revisados para o valor configurado em `TERMS_VERSION`.
 
-O núcleo do MVP está persistente e autenticado, mas uma operação pública completa ainda depende de infraestrutura externa. Recuperação de senha, verificação de e-mail, segundo fator, envio transacional, observabilidade centralizada e rotina automatizada de backup não estão implementados neste repositório. Domínio, TLS, banco gerenciado e credenciais de deploy também precisam ser fornecidos pelo ambiente de hospedagem.
+O núcleo do MVP está persistente e autenticado. A recuperação de senha por código enviado por e-mail está implementada e depende da configuração do Resend e da ativação de `PASSWORD_RESET_ENABLED`; consulte [configuração e validação da recuperação](apps/api/README.md#recuperação-de-senha-por-e-mail). Verificação de e-mail no cadastro, segundo fator, observabilidade centralizada e rotina automatizada de backup ainda não estão implementados. Domínio, TLS, banco gerenciado e credenciais de deploy precisam ser fornecidos pelo ambiente de hospedagem.
 
 ## Segurança operacional
 

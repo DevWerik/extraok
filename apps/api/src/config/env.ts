@@ -41,6 +41,17 @@ const DEVELOPMENT_ONLY_PEPPERS = new Set([
   "extraok-local-development-pepper-do-not-use-in-production",
 ]);
 
+const optionalSetting = z.preprocess(
+  (value) => typeof value === "string" && value.trim() === "" ? undefined : value,
+  z.string().trim().optional(),
+);
+
+function isEmailSender(value: string): boolean {
+  if (/[\r\n]/.test(value)) return false;
+  const match = /^(?:[^<>]+\s<([^<>]+)>|([^<>]+))$/.exec(value);
+  return z.email().safeParse(match?.[1] ?? match?.[2]).success;
+}
+
 export const envSchema = z
   .object({
     NODE_ENV: z.enum(["development", "test", "production"]),
@@ -49,6 +60,10 @@ export const envSchema = z
     PORT: z.coerce.number().int().min(1).max(65_535).default(3333),
     WEB_ORIGIN: webOriginSchema,
     PASSWORD_PEPPER: z.string().min(32),
+    PASSWORD_RESET_ENABLED: booleanFromEnvironment.default(false),
+    PASSWORD_RESET_OTP_SECRET: optionalSetting,
+    RESEND_API_KEY: optionalSetting,
+    EMAIL_FROM: optionalSetting,
     SESSION_TTL_DAYS: z.coerce.number().int().min(1).max(90).default(30),
     SESSION_IDLE_HOURS: z.coerce.number().int().min(1).max(168).default(12),
     APPROVAL_LINK_TTL_DAYS: z.coerce
@@ -64,6 +79,19 @@ export const envSchema = z
     TRUST_PROXY: booleanFromEnvironment.default(false),
   })
   .superRefine((environment, context) => {
+    if (environment.PASSWORD_RESET_ENABLED) {
+      if (!environment.RESEND_API_KEY?.startsWith("re_") || environment.RESEND_API_KEY.length < 10) {
+        context.addIssue({ code: "custom", path: ["RESEND_API_KEY"], message: "Configure uma chave de API do Resend para ativar a recuperação de senha." });
+      }
+      if (!environment.EMAIL_FROM || !isEmailSender(environment.EMAIL_FROM)) {
+        context.addIssue({ code: "custom", path: ["EMAIL_FROM"], message: "Configure um remetente válido e verificado no Resend." });
+      }
+      if (!environment.PASSWORD_RESET_OTP_SECRET || environment.PASSWORD_RESET_OTP_SECRET.length < 32) {
+        context.addIssue({ code: "custom", path: ["PASSWORD_RESET_OTP_SECRET"], message: "Configure um segredo de recuperação com pelo menos 32 caracteres." });
+      } else if (environment.PASSWORD_RESET_OTP_SECRET === environment.PASSWORD_PEPPER) {
+        context.addIssue({ code: "custom", path: ["PASSWORD_RESET_OTP_SECRET"], message: "O segredo de recuperação deve ser diferente de PASSWORD_PEPPER." });
+      }
+    }
     if (environment.NODE_ENV !== "production") return;
 
     const origin = new URL(environment.WEB_ORIGIN);
