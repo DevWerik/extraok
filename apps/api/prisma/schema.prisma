@@ -40,6 +40,9 @@ model User {
   sessions        Session[]
   clients         Client[]
   jobs            Job[]
+  billingPayments BillingPayment[]
+  billingPeriods  BillingPeriod[]
+  approvalUsage   ApprovalUsage[]
   passwordResetState      PasswordResetState?
   passwordResetChallenges PasswordResetChallenge[]
   passwordResetGrants     PasswordResetGrant[]
@@ -161,6 +164,7 @@ model Job {
   client        Client         @relation(fields: [clientId], references: [id], onDelete: Restrict)
   extras        Extra[]
   approvalLinks ApprovalLink[]
+  approvalUsage ApprovalUsage?
 
   @@index([ownerId, scheduledAt], map: "jobs_owner_id_scheduled_at_idx")
   @@index([ownerId, status], map: "jobs_owner_id_status_idx")
@@ -196,4 +200,83 @@ model ApprovalLink {
   @@index([jobId, createdAt], map: "approval_links_job_id_created_at_idx")
   @@index([expiresAt], map: "approval_links_expires_at_idx")
   @@map("approval_links")
+}
+
+enum BillingPlan {
+  free
+  pro
+  business
+
+  @@map("billing_plan")
+}
+
+enum BillingPaymentStatus {
+  creating
+  pending
+  approved
+  expired
+  cancelled
+  rejected
+  refunded
+
+  @@map("billing_payment_status")
+}
+
+model BillingPayment {
+  id                String               @id @default(uuid()) @db.Uuid
+  ownerId           String               @map("owner_id") @db.Uuid
+  plan              BillingPlan
+  priceCents        Int                  @map("price_cents")
+  jobLimit          Int                  @map("job_limit")
+  status            BillingPaymentStatus @default(creating)
+  providerId        String?              @unique @map("provider_id") @db.VarChar(64)
+  payerEmail        String               @map("payer_email") @db.VarChar(320)
+  payerName         String               @map("payer_name") @db.VarChar(120)
+  payerDocument     String?              @map("payer_document") @db.VarChar(11)
+  qrCode            String?              @map("qr_code") @db.Text
+  qrCodeBase64       String?              @map("qr_code_base64") @db.Text
+  expiresAt         DateTime             @map("expires_at") @db.Timestamptz(3)
+  approvedAt        DateTime?            @map("approved_at") @db.Timestamptz(3)
+  providerUpdatedAt DateTime?            @map("provider_updated_at") @db.Timestamptz(3)
+  lastCheckedAt     DateTime?            @map("last_checked_at") @db.Timestamptz(3)
+  createdAt         DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime             @updatedAt @map("updated_at") @db.Timestamptz(3)
+  owner             User                 @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  period            BillingPeriod?
+
+  @@index([ownerId, createdAt], map: "billing_payments_owner_created_idx")
+  @@index([status, lastCheckedAt], map: "billing_payments_reconcile_idx")
+  @@map("billing_payments")
+}
+
+model BillingPeriod {
+  id        String         @id @default(uuid()) @db.Uuid
+  ownerId   String         @map("owner_id") @db.Uuid
+  paymentId String         @unique @map("payment_id") @db.Uuid
+  plan      BillingPlan
+  jobLimit  Int            @map("job_limit")
+  startsAt  DateTime       @map("starts_at") @db.Timestamptz(3)
+  endsAt    DateTime       @map("ends_at") @db.Timestamptz(3)
+  revokedAt DateTime?      @map("revoked_at") @db.Timestamptz(3)
+  owner     User           @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  payment   BillingPayment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  usage     ApprovalUsage[]
+
+  @@index([ownerId, startsAt, endsAt], map: "billing_periods_owner_dates_idx")
+  @@map("billing_periods")
+}
+
+model ApprovalUsage {
+  jobId     String         @id @map("job_id") @db.Uuid
+  ownerId   String         @map("owner_id") @db.Uuid
+  periodId  String?        @map("period_id") @db.Uuid
+  freeMonth String?        @map("free_month") @db.VarChar(7)
+  createdAt DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  job       Job            @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  owner     User           @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  period    BillingPeriod? @relation(fields: [periodId], references: [id], onDelete: SetNull)
+
+  @@index([ownerId, freeMonth], map: "approval_usage_free_month_idx")
+  @@index([periodId], map: "approval_usage_period_idx")
+  @@map("approval_usage")
 }

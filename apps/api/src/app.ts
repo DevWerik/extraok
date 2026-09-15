@@ -11,6 +11,8 @@ import { registerClientRoutes } from "./modules/clients/routes.js";
 import { registerDashboardRoutes } from "./modules/dashboard/routes.js";
 import { registerExtraRoutes } from "./modules/extras/routes.js";
 import { registerJobRoutes } from "./modules/jobs/routes.js";
+import { createPixGateway, type PixGateway } from "./modules/billing/mercadopago.js";
+import { registerBillingRoutes } from "./modules/billing/routes.js";
 import { configureSecurity } from "./plugins/security.js";
 import type { PrismaClient } from "./generated/prisma/client.js";
 
@@ -20,6 +22,8 @@ export interface BuildAppOptions {
   logger?: boolean;
   passwordResetMailer?: PasswordResetMailer;
   passwordResetDeliveryEnabled?: boolean;
+  pixGateway?: PixGateway;
+  billingReconciliationEnabled?: boolean;
 }
 
 export async function buildApp(
@@ -49,6 +53,8 @@ export async function buildApp(
             "req.body.code",
             "req.body.otp",
             "req.body.resetToken",
+            "req.body.cpf",
+            'req.headers["x-signature"]',
             "req.params.token",
           ],
           censor: "[REDACTED]",
@@ -108,6 +114,9 @@ export async function buildApp(
       await registerExtraRoutes(api);
       await registerDashboardRoutes(api);
       await registerApprovalRoutes(api);
+      await registerBillingRoutes(api, options.pixGateway ?? createPixGateway(env), {
+        reconciliationEnabled: options.billingReconciliationEnabled,
+      });
     },
     { prefix: "/api/v1" },
   );

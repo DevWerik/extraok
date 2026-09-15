@@ -100,6 +100,7 @@ export async function registerJobRoutes(app: FastifyInstance): Promise<void> {
         where: { id, ownerId: user.id },
         include: {
           client: true,
+          approvalUsage: { select: { jobId: true } },
           extras: { orderBy: { createdAt: "asc" } },
           approvalLinks: {
             where: { revokedAt: null, expiresAt: { gt: new Date() } },
@@ -116,6 +117,7 @@ export async function registerJobRoutes(app: FastifyInstance): Promise<void> {
         client,
         extras,
         approvalLinks,
+        approvalUsage,
         ownerId: _ownerId,
         ...job
       } = result;
@@ -127,6 +129,7 @@ export async function registerJobRoutes(app: FastifyInstance): Promise<void> {
         extras,
         approvedTotalCents: sumApproved(extras),
         approvalLink: {
+          alreadyShared: Boolean(approvalUsage),
           active: approvalLinks.length > 0,
           expiresAt: approvalLinks[0]?.expiresAt ?? null,
         },

@@ -5,6 +5,7 @@ import { conflict, gone, notFound } from "../../lib/errors.js";
 import { createOpaqueToken, hashToken } from "../../lib/tokens.js";
 import { parseWith } from "../../lib/validation.js";
 import { currentUser, requireAuth } from "../../plugins/auth.js";
+import { consumeApproval, lockBilling } from "../billing/entitlements.js";
 
 const jobParamsSchema = z.object({ jobId: z.string().uuid() });
 const tokenParamsSchema = z.object({
@@ -97,6 +98,8 @@ export async function registerApprovalRoutes(
       const now = new Date();
 
       await app.prisma.$transaction(async (transaction) => {
+        await lockBilling(transaction, user.id);
+        await consumeApproval(transaction, user.id, jobId);
         // Serializa rotacoes do mesmo atendimento. O indice parcial da migration
         // continua sendo a ultima barreira para garantir apenas um link ativo.
         await transaction.$queryRaw`

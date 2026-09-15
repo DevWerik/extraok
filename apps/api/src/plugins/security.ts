@@ -6,6 +6,7 @@ import type { FastifyInstance } from "fastify";
 
 import type { Env } from "../config/env.js";
 import { forbidden } from "../lib/errors.js";
+import { BILLING_WEBHOOK_PATH } from "../modules/billing/plans.js";
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
@@ -46,6 +47,10 @@ export async function configureSecurity(
 
   app.addHook("onRequest", async (request) => {
     if (SAFE_METHODS.has(request.method)) return;
+
+    // Only this server-to-server route replaces Origin with HMAC authentication.
+    // Its handler validates the signature before calling the provider or database.
+    if (request.method === "POST" && request.url.split("?", 1)[0] === BILLING_WEBHOOK_PATH) return;
 
     const origin = request.headers.origin;
     if (origin !== env.WEB_ORIGIN) {

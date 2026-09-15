@@ -64,6 +64,12 @@ export const envSchema = z
     PASSWORD_RESET_OTP_SECRET: optionalSetting,
     RESEND_API_KEY: optionalSetting,
     EMAIL_FROM: optionalSetting,
+    BILLING_ENABLED: booleanFromEnvironment.default(false),
+    MERCADOPAGO_ACCESS_TOKEN: optionalSetting,
+    MERCADOPAGO_WEBHOOK_SECRET: optionalSetting,
+    MERCADOPAGO_COLLECTOR_ID: optionalSetting,
+    MERCADOPAGO_WEBHOOK_URL: optionalSetting,
+    MERCADOPAGO_LIVE_MODE: booleanFromEnvironment.default(false),
     SESSION_TTL_DAYS: z.coerce.number().int().min(1).max(90).default(30),
     SESSION_IDLE_HOURS: z.coerce.number().int().min(1).max(168).default(12),
     APPROVAL_LINK_TTL_DAYS: z.coerce
@@ -79,6 +85,26 @@ export const envSchema = z
     TRUST_PROXY: booleanFromEnvironment.default(false),
   })
   .superRefine((environment, context) => {
+    if (environment.BILLING_ENABLED) {
+      for (const key of ["MERCADOPAGO_ACCESS_TOKEN", "MERCADOPAGO_WEBHOOK_SECRET"] as const) {
+        if (!environment[key] || environment[key].length < 32) {
+          context.addIssue({ code: "custom", path: [key], message: "Configure a credencial do Mercado Pago com pelo menos 32 caracteres." });
+        }
+      }
+      if (!/^\d+$/.test(environment.MERCADOPAGO_COLLECTOR_ID ?? "")) {
+        context.addIssue({ code: "custom", path: ["MERCADOPAGO_COLLECTOR_ID"], message: "Configure o ID da conta recebedora do Mercado Pago." });
+      }
+      try {
+        const url = new URL(environment.MERCADOPAGO_WEBHOOK_URL ?? "");
+        if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash ||
+          url.pathname !== "/api/v1/billing/webhooks/mercadopago") throw new Error();
+      } catch {
+        context.addIssue({ code: "custom", path: ["MERCADOPAGO_WEBHOOK_URL"], message: "Configure a URL HTTPS pública terminando em /api/v1/billing/webhooks/mercadopago, sem parâmetros." });
+      }
+      if (environment.NODE_ENV === "production" && !environment.MERCADOPAGO_LIVE_MODE) {
+        context.addIssue({ code: "custom", path: ["MERCADOPAGO_LIVE_MODE"], message: "Pagamentos em produção exigem MERCADOPAGO_LIVE_MODE=true." });
+      }
+    }
     if (environment.PASSWORD_RESET_ENABLED) {
       if (!environment.RESEND_API_KEY?.startsWith("re_") || environment.RESEND_API_KEY.length < 10) {
         context.addIssue({ code: "custom", path: ["RESEND_API_KEY"], message: "Configure uma chave de API do Resend para ativar a recuperação de senha." });
