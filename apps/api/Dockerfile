@@ -57,6 +57,7 @@ WORKDIR /app
 COPY --from=production-dependencies --chown=node:node /app/node_modules ./node_modules
 COPY --from=production-dependencies --chown=node:node /app/apps/api/node_modules ./apps/api/node_modules
 COPY --from=build --chown=node:node /app/apps/api/dist ./apps/api/dist
+COPY --from=build --chown=node:node /app/apps/api/prisma/migrations ./apps/api/prisma/migrations
 COPY --from=build --chown=node:node /app/apps/api/package.json ./apps/api/package.json
 
 USER node

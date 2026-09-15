@@ -12,6 +12,7 @@
     "typecheck": "prisma generate && tsc --noEmit -p tsconfig.test.json",
     "test": "tsx --test tests/*.test.ts",
     "test:integration": "tsx --test tests/integration.test.ts",
+    "billing:check": "tsx src/scripts/check-billing.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate:dev": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
