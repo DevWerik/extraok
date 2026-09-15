@@ -19,6 +19,7 @@ const PRIVATE_PATHS = new Set([
   '/clientes',
   '/atendimentos',
   '/atendimentos/novo',
+  '/meu-plano',
 ])
 
 function safeLoginDestination(requestedPath: string | null): string {

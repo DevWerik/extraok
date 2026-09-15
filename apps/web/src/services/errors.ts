@@ -9,6 +9,9 @@ export type ServiceErrorCode =
   | 'NETWORK_ERROR'
   | 'INTERNAL_ERROR'
   | 'GONE'
+  | 'PLAN_LIMIT_REACHED'
+  | 'PAYMENT_UNAVAILABLE'
+  | 'PAYMENT_MISMATCH'
 
 export class ServiceError extends Error {
   readonly code: ServiceErrorCode

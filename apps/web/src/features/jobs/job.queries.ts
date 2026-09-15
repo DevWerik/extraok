@@ -51,6 +51,7 @@ export function useCreateApprovalLink() {
     mutationFn: (jobId: string) => jobsService.createApprovalLink(jobId),
     onSuccess: (_link, jobId) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.jobs.detail(jobId) })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.billing.summary })
     },
   })
 }

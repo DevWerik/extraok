@@ -17,6 +17,7 @@ import { isServiceError } from '@/services/errors'
 const pageDetails = [
   { match: /^\/dashboard$/, title: 'Visão geral', eyebrow: 'Seu negócio hoje' },
   { match: /^\/clientes$/, title: 'Clientes', eyebrow: 'Relacionamentos' },
+  { match: /^\/meu-plano$/, title: 'Meu plano', eyebrow: 'Planos e pagamentos' },
   { match: /^\/atendimentos\/novo$/, title: 'Novo atendimento', mobileTitle: 'Novo atendimento', eyebrow: 'Atendimentos' },
   { match: /^\/atendimentos\/[^/]+$/, title: 'Detalhes do atendimento', mobileTitle: 'Atendimento', eyebrow: 'Atendimentos' },
   { match: /^\/atendimentos$/, title: 'Atendimentos', eyebrow: 'Operação' },
@@ -95,6 +96,7 @@ export function AppHeader({ onOpenMenu }: AppHeaderProps) {
             <DropdownMenuItem asChild>
               <Link to="/dashboard">Visão geral</Link>
             </DropdownMenuItem>
+            <DropdownMenuItem asChild><Link to="/meu-plano">Meu plano</Link></DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
               onSelect={() => void handleSignOut()}

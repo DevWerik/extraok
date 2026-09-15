@@ -1,6 +1,12 @@
 import type { ClientFilters, JobFilters } from '@/services/contracts'
 
 export const queryKeys = {
+  billing: {
+    all: ['billing'] as const,
+    plans: ['billing', 'plans'] as const,
+    summary: ['billing', 'summary'] as const,
+    payment: (id: string) => ['billing', 'payment', id] as const,
+  },
   auth: {
     session: ['auth', 'session'] as const,
   },

@@ -28,6 +28,9 @@ const serviceErrorCodes = new Set<ServiceErrorCode>([
   'NETWORK_ERROR',
   'INTERNAL_ERROR',
   'GONE',
+  'PLAN_LIMIT_REACHED',
+  'PAYMENT_UNAVAILABLE',
+  'PAYMENT_MISMATCH',
 ])
 
 function fallbackCode(status: number): ServiceErrorCode {

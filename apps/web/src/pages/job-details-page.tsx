@@ -54,6 +54,7 @@ import { centsToCurrencyInput, parseCurrencyInputToCents } from '@/lib/currency'
 import { formatCurrency, formatDateTime } from '@/lib/formatters'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { isServiceError } from '@/services/errors'
+import { useBilling } from '@/features/billing/billing.queries'
 import type { Extra, JobStatus } from '@/types/domain'
 
 const allowedStatusTransitions: Record<JobStatus, readonly JobStatus[]> = {
@@ -66,6 +67,7 @@ const allowedStatusTransitions: Record<JobStatus, readonly JobStatus[]> = {
 export function JobDetailsPage() {
   const { id = '' } = useParams()
   const details = useJob(id)
+  const billing = useBilling()
   const updateStatus = useUpdateJobStatus()
   const createApprovalLink = useCreateApprovalLink()
   const createExtra = useCreateExtra()
@@ -99,6 +101,7 @@ export function JobDetailsPage() {
 
   const { job, client, extras, approvedTotalCents, approvalLink } = details.data
   const statusMeta = jobStatusMeta[job.status]
+  const limitReached = !approvalLink.alreadyShared && billing.data?.current.remaining === 0
 
   function openCreate() {
     setEditingExtra(null)
@@ -162,6 +165,9 @@ export function JobDetailsPage() {
           : 'Link de aprovação gerado com segurança.',
       )
     } catch (error) {
+      if (isServiceError(error) && error.code === 'PLAN_LIMIT_REACHED') {
+        void billing.refetch()
+      }
       toast.error(isServiceError(error) ? error.message : 'Não foi possível gerar o link.')
     }
   }
@@ -247,7 +253,7 @@ export function JobDetailsPage() {
               </div>
               <Button
                 onClick={handleCreateApprovalLink}
-                disabled={createApprovalLink.isPending || extras.length === 0}
+                disabled={createApprovalLink.isPending || extras.length === 0 || limitReached}
               >
                 <Link2 className="size-4" />
                 {createApprovalLink.isPending
@@ -259,6 +265,12 @@ export function JobDetailsPage() {
             </div>
           )}
           {extras.length === 0 && <p className="mt-3 text-xs text-warning">Adicione pelo menos um serviço extra antes de gerar o link.</p>}
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t pt-4 text-sm">
+            <p className={limitReached ? 'font-semibold text-destructive' : 'text-muted-foreground'}>
+              {approvalLink.alreadyShared ? 'Este atendimento já foi contabilizado. Substituir o link não consome seu limite.' : limitReached ? 'Você atingiu o limite de atendimentos com link deste período.' : billing.data ? `${billing.data.current.remaining} atendimentos com link disponíveis no seu plano.` : 'Seu limite será verificado ao gerar o primeiro link.'}
+            </p>
+            <Button asChild size="sm" variant="outline"><Link to="/meu-plano">Meu plano</Link></Button>
+          </div>
         </CardContent>
       </Card>
 

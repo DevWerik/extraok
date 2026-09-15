@@ -104,6 +104,7 @@ export interface JobDetails {
 }
 
 export interface ApprovalLinkSummary {
+  alreadyShared: boolean
   active: boolean
   expiresAt: string | null
 }

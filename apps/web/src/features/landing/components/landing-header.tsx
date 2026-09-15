@@ -8,6 +8,7 @@ const navigationItems = [
   { href: "#como-funciona", label: "Como funciona" },
   { href: "#beneficios", label: "Benefícios" },
   { href: "#exemplo", label: "Exemplo" },
+  { href: "#planos", label: "Planos" },
 ]
 
 export function LandingHeader() {
@@ -18,7 +19,7 @@ export function LandingHeader() {
 
         <nav
           aria-label="Navegação principal"
-          className="order-3 mt-3 flex w-full items-center justify-center gap-5 border-t border-border pt-3 text-sm font-medium text-muted-foreground sm:order-none sm:mt-0 sm:w-auto sm:border-0 sm:pt-0"
+          className="order-3 mt-3 flex w-full flex-wrap items-center justify-center gap-x-4 gap-y-2 border-t border-border pt-3 text-sm font-medium text-muted-foreground lg:order-none lg:mt-0 lg:w-auto lg:border-0 lg:pt-0"
         >
           {navigationItems.map((item) => (
             <a
