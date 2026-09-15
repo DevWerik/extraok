@@ -42,6 +42,14 @@ Use `db:migrate:dev` somente no desenvolvimento. Imagens e servidores publicados
 
 As rotas de negócio ficam sob `/api/v1`. Rotas privadas exigem o cookie de sessão emitido no login; os endpoints públicos de aprovação carregam um token na URL e não devem ser enviados a logs ou ferramentas de analytics.
 
+## Planos e pagamento por Pix
+
+Gratuito, Pro e Negócio controlam o primeiro link de cada atendimento. A compra de um plano pago libera 30 dias somente após confirmação do Mercado Pago; renovações são manuais. O recurso vem com cobranças desativadas (`BILLING_ENABLED=false`). A migration `0003_pix_billing` é necessária também para o plano Gratuito.
+
+Consulte [Planos e Pix](BILLING.md) para limites, preços, configuração do provedor, variáveis por ambiente e validação antes da ativação.
+
+Na raiz, `pnpm.cmd billing:check` identifica configurações pendentes e confere a migration no banco em modo de leitura, sem gerar pagamentos ou exibir credenciais.
+
 ## Recuperação de senha por e-mail
 
 A página `/recuperar-senha` solicita um OTP de 8 dígitos, valida o código e permite cadastrar uma nova senha. O envio usa a API HTTPS do Resend pelo `fetch` nativo do Node, com cancelamento após 8 segundos. Nenhuma chave de e-mail é necessária no frontend.
