@@ -57,6 +57,13 @@ export const router = createBrowserRouter([
         element: <AppShell />,
         children: [
           {
+            path: '/relatorios',
+            lazy: async () => {
+              const { ReportsPage } = await import('@/pages/reports-page')
+              return { Component: ReportsPage }
+            },
+          },
+          {
             path: '/meu-plano',
             lazy: async () => {
               const { BillingPage } = await import('@/pages/billing-page')

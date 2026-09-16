@@ -22,13 +22,18 @@ Por padrão, o Vite encaminha `/api` para `http://127.0.0.1:3333`. Consulte `.en
 - `/recuperar-senha` — recuperação com código por e-mail e cadastro de nova senha
 - `/dashboard` — visão geral do negócio
 - `/meu-plano` — consumo, três planos, compra e acompanhamento do Pix
+- `/relatorios` — filtros por data agendada, cliente e status; totais, paginação e CSV no Negócio
 - `/clientes` — consulta e cadastro de clientes
 - `/atendimentos` — listagem de atendimentos
 - `/atendimentos/novo` — criação de atendimento
-- `/atendimentos/:id` — detalhes e gestão de serviços extras
+- `/atendimentos/:id` — detalhes, gestão de serviços extras e PDF no Pro/Negócio
 - `/aprovar/:token` — aprovação pública do cliente
 
 O catálogo também aparece em `/#planos`. Preços, limites e confirmação de pagamento vêm da API. Consulte [Planos e Pix](../api/BILLING.md) para ativar as cobranças; nenhuma credencial do Mercado Pago pertence ao frontend.
+
+Os cartões exibem os benefícios retornados pelo catálogo e os botões consultam as permissões do período vigente. As rotas de download validam essas permissões novamente na API. Na implantação desta atualização, publique a API antes do frontend.
+
+Quando a API retorna `current.billingExempt=true`, **Meu plano** exibe o acesso do proprietário, sem limite mensal, vencimento ou botões de cobrança. O frontend não recebe o UUID configurado em `BILLING_OWNER_USER_ID` nem permite escolher essa condição. Ative a isenção na API somente depois de publicar também esta interface.
 
 ## Cloudflare Workers + Render
 

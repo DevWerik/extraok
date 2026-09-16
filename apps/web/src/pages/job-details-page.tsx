@@ -55,6 +55,7 @@ import { formatCurrency, formatDateTime } from '@/lib/formatters'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { isServiceError } from '@/services/errors'
 import { useBilling } from '@/features/billing/billing.queries'
+import { JobPdfButton } from '@/features/billing/job-pdf-button'
 import type { Extra, JobStatus } from '@/types/domain'
 
 const allowedStatusTransitions: Record<JobStatus, readonly JobStatus[]> = {
@@ -183,6 +184,7 @@ export function JobDetailsPage() {
 
   return (
     <section aria-labelledby="job-detail-heading" className="space-y-6">
+      <div className="flex justify-end"><JobPdfButton jobId={job.id} /></div>
       <Button asChild variant="ghost" className="-ml-3"><Link to="/atendimentos"><ArrowLeft className="size-4" />Voltar aos atendimentos</Link></Button>
 
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -267,7 +269,7 @@ export function JobDetailsPage() {
           {extras.length === 0 && <p className="mt-3 text-xs text-warning">Adicione pelo menos um serviço extra antes de gerar o link.</p>}
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t pt-4 text-sm">
             <p className={limitReached ? 'font-semibold text-destructive' : 'text-muted-foreground'}>
-              {approvalLink.alreadyShared ? 'Este atendimento já foi contabilizado. Substituir o link não consome seu limite.' : limitReached ? 'Você atingiu o limite de atendimentos com link deste período.' : billing.data ? `${billing.data.current.remaining} atendimentos com link disponíveis no seu plano.` : 'Seu limite será verificado ao gerar o primeiro link.'}
+              {billing.data?.current.billingExempt ? 'Sua conta de proprietário pode compartilhar atendimentos sem limite mensal.' : approvalLink.alreadyShared ? 'Este atendimento já foi contabilizado. Substituir o link não consome seu limite.' : limitReached ? 'Você atingiu o limite de atendimentos com link deste período.' : billing.data ? `${billing.data.current.remaining} atendimentos com link disponíveis no seu plano.` : 'Seu limite será verificado ao gerar o primeiro link.'}
             </p>
             <Button asChild size="sm" variant="outline"><Link to="/meu-plano">Meu plano</Link></Button>
           </div>

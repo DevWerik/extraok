@@ -1,4 +1,4 @@
-import { BriefcaseBusiness, LayoutDashboard, LogOut, ShieldCheck, Users, Wallet } from 'lucide-react'
+import { BarChart3, BriefcaseBusiness, LayoutDashboard, LogOut, ShieldCheck, Users, Wallet } from 'lucide-react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Brand } from '@/components/layout/brand'
@@ -10,6 +10,7 @@ const navItems = [
   { to: '/dashboard', label: 'Visão geral', icon: LayoutDashboard },
   { to: '/clientes', label: 'Clientes', icon: Users },
   { to: '/atendimentos', label: 'Atendimentos', icon: BriefcaseBusiness },
+  { to: '/relatorios', label: 'Relatórios', icon: BarChart3 },
   { to: '/meu-plano', label: 'Meu plano', icon: Wallet },
 ]
 

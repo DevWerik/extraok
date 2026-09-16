@@ -14,6 +14,7 @@ import { useBilling, useBillingPayment, useCreatePayment } from '@/features/bill
 import type { BillingSummary, PaidPlanId, Plan } from '@/features/billing/billing.types'
 import { paymentLabels, pixCountdown, visiblePaymentStatus } from '@/features/billing/billing.utils'
 import { PlanCards } from '@/features/billing/plan-cards'
+import { OwnerAccessPanel } from '@/features/billing/owner-access-panel'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { formatCurrency, formatDateTime } from '@/lib/formatters'
 import { queryKeys } from '@/lib/query-keys'
@@ -29,6 +30,7 @@ export function BillingPage() {
   const paymentId = selectedPaymentId ?? pendingPayment?.id ?? null
 
   function choosePlan(plan: Plan) {
+    if (billing.data?.current.billingExempt) return
     purchase.reset()
     setCpf('')
     setSelection({ plan, key: crypto.randomUUID() })
@@ -36,7 +38,7 @@ export function BillingPage() {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!selection || selection.plan.id === 'free' || purchase.isPending) return
+    if (!selection || selection.plan.id === 'free' || purchase.isPending || billing.data?.current.billingExempt) return
     try {
       const payment = await purchase.mutateAsync({ planId: selection.plan.id as PaidPlanId, cpf, idempotencyKey: selection.key })
       setSelectedPaymentId(payment.id)
@@ -48,8 +50,10 @@ export function BillingPage() {
   if (billing.isPending) return <div role="status" aria-label="Carregando seu plano" className="space-y-6"><Skeleton className="h-40 rounded-xl" /><div className="grid gap-5 md:grid-cols-3">{[1, 2, 3].map((id) => <Skeleton key={id} className="h-96 rounded-xl" />)}</div></div>
   if (!billing.data) return <section className="rounded-xl border bg-card p-8 text-center" role="alert"><h2 className="text-xl font-bold">Não foi possível consultar seu plano</h2><p className="mt-2 text-muted-foreground">Verifique sua conexão e tente novamente.</p><Button className="mt-4" onClick={() => void billing.refetch()}>Tentar novamente</Button></section>
   const data = billing.data
+  if (data.current.billingExempt) return <OwnerAccessPanel summary={data} />
   const currentName = data.plans.find((plan) => plan.id === data.current.planId)?.name ?? 'Gratuito'
-  const scheduled = data.current.planId !== 'free' || data.upcoming.length > 0
+  const nextPurchaseDate = data.nextPurchaseStartsAt ? formatDateTime(data.nextPurchaseStartsAt) : null
+  const scheduled = Boolean(nextPurchaseDate && (data.current.planId !== 'free' || data.upcoming.length > 0))
 
   return (
     <section aria-labelledby="billing-heading" className="space-y-8">
@@ -69,7 +73,7 @@ export function BillingPage() {
       {paymentId && <PixPaymentPanel key={paymentId} id={paymentId} summary={data} onClose={() => setSelectedPaymentId(null)} />}
 
       <div className="space-y-5">
-        <div><h3 className="text-xl font-bold text-primary">Escolha seu plano</h3><p className="mt-1 text-sm text-muted-foreground">{scheduled ? `Seu próximo período começa em ${formatDateTime(data.nextPurchaseStartsAt)}.` : 'Os 30 dias começam quando o pagamento for confirmado.'}</p></div>
+        <div><h3 className="text-xl font-bold text-primary">Escolha seu plano</h3><p className="mt-1 text-sm text-muted-foreground">{scheduled ? `Seu próximo período começa em ${nextPurchaseDate}.` : 'Os 30 dias começam quando o pagamento for confirmado.'}</p></div>
         {!data.pixAvailable && <p className="rounded-xl border border-warning/30 bg-warning-soft p-4 text-sm" role="status">O pagamento por Pix está temporariamente indisponível. Você pode continuar usando seu plano atual.</p>}
         {pendingPayment && <p className="text-sm text-muted-foreground" role="status">Você já tem um Pix em aberto. Conclua esse pagamento ou aguarde a validade antes de comprar outro plano.</p>}
         <PlanCards plans={data.plans} action={(plan) => plan.id === 'free'
@@ -83,7 +87,7 @@ export function BillingPage() {
       <Dialog open={Boolean(selection)} onOpenChange={(open) => { if (!open && !purchase.isPending) { setSelection(null); setCpf(''); purchase.reset() } }}>
         <DialogContent>
           <DialogHeader><DialogTitle>Pagar {selection?.plan.name} com Pix</DialogTitle><DialogDescription>{selection && formatCurrency(selection.plan.priceCents)} por 30 dias, com até {selection?.plan.jobLimit} atendimentos com link. Sem renovação automática.</DialogDescription></DialogHeader>
-          <p className="rounded-lg bg-muted p-3 text-sm">{scheduled ? `O período será adicionado após os já pagos, a partir de ${formatDateTime(data.nextPurchaseStartsAt)}. O limite atual não muda.` : 'Seu plano será liberado depois da confirmação do pagamento.'}</p>
+          <p className="rounded-lg bg-muted p-3 text-sm">{scheduled ? `O período será adicionado após os já pagos, a partir de ${nextPurchaseDate}. O novo limite e os benefícios começam nessa data.` : 'Seu plano será liberado depois da confirmação do pagamento.'}</p>
           <form onSubmit={(event) => void submit(event)} className="space-y-4">
             <div className="space-y-2"><Label htmlFor="billing-cpf">CPF do pagador</Label><Input id="billing-cpf" name="cpf" inputMode="numeric" autoComplete="off" maxLength={14} value={cpf} onChange={(event) => setCpf(event.target.value.replace(/[^\d.-]/g, '').slice(0, 14))} required disabled={purchase.isPending} aria-describedby="billing-cpf-help billing-form-error" /><p id="billing-cpf-help" className="text-xs text-muted-foreground">Usado para gerar sua cobrança no Mercado Pago.</p></div>
             <div id="billing-form-error" role="alert">{purchase.isError && <p className="text-sm text-destructive">{isServiceError(purchase.error) ? purchase.error.message : 'Não foi possível gerar o Pix. Tente novamente.'}</p>}</div>

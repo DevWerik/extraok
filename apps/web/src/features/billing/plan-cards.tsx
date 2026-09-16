@@ -8,8 +8,8 @@ import type { Plan, PlanId } from './billing.types'
 
 const descriptions: Record<PlanId, string> = {
   free: 'Experimente o fluxo completo com seus primeiros clientes.',
-  pro: 'Para organizar os extras e aprovações da sua rotina.',
-  business: 'Mais capacidade para quem tem um volume maior de atendimentos.',
+  pro: 'Organize sua rotina e entregue um registro em PDF ao cliente.',
+  business: 'Acompanhe seus resultados com filtros e exporte seus relatórios.',
 }
 
 export function PlanCards({ plans, action }: { plans: Plan[]; action: (plan: Plan) => ReactNode }) {
@@ -28,13 +28,7 @@ export function PlanCards({ plans, action }: { plans: Plan[]; action: (plan: Pla
           </CardHeader>
           <CardContent className="flex-1">
             <ul className="space-y-3 text-sm">
-              {[
-                `${plan.jobLimit} atendimentos com link ${plan.id === 'free' ? 'por mês' : 'por período'}`,
-                'Cadastro de clientes e serviços extras',
-                'Aprovação pelo celular do cliente',
-                'Histórico de atendimentos e respostas',
-                'Reenvio do mesmo atendimento sem novo consumo',
-              ].map((benefit) => <li key={benefit} className="flex items-start gap-2"><Check className="mt-0.5 size-4 shrink-0 text-success" aria-hidden="true" /><span>{benefit}</span></li>)}
+              {plan.benefits.map((benefit) => <li key={benefit} className="flex items-start gap-2"><Check className="mt-0.5 size-4 shrink-0 text-success" aria-hidden="true" /><span>{benefit}</span></li>)}
             </ul>
           </CardContent>
           <CardFooter>{action(plan)}</CardFooter>

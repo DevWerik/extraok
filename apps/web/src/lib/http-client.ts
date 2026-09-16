@@ -15,6 +15,7 @@ interface ApiErrorPayload {
 interface ApiRequestOptions extends Omit<RequestInit, 'body'> {
   body?: unknown
   skipAuthRedirect?: boolean
+  responseType?: 'json' | 'blob'
 }
 
 const serviceErrorCodes = new Set<ServiceErrorCode>([
@@ -29,6 +30,8 @@ const serviceErrorCodes = new Set<ServiceErrorCode>([
   'INTERNAL_ERROR',
   'GONE',
   'PLAN_LIMIT_REACHED',
+  'PLAN_FEATURE_REQUIRED',
+  'BILLING_EXEMPT',
   'PAYMENT_UNAVAILABLE',
   'PAYMENT_MISMATCH',
 ])
@@ -54,10 +57,10 @@ function fallbackMessage(status: number): string {
 
 export async function apiRequest<T>(
   path: string,
-  { body, headers, skipAuthRedirect = false, ...options }: ApiRequestOptions = {},
+  { body, headers, skipAuthRedirect = false, responseType = 'json', ...options }: ApiRequestOptions = {},
 ): Promise<T> {
   const requestHeaders = new Headers(headers)
-  requestHeaders.set('Accept', 'application/json')
+  requestHeaders.set('Accept', responseType === 'blob' ? 'application/pdf, text/csv, application/json' : 'application/json')
   requestHeaders.set('X-Requested-With', 'ExtraOK-Web')
 
   if (body !== undefined) {
@@ -84,6 +87,7 @@ export async function apiRequest<T>(
   }
 
   if (response.status === 204) return undefined as T
+  if (response.ok && responseType === 'blob') return await response.blob() as T
 
   const isJson = response.headers.get('content-type')?.includes('application/json')
   const payload = isJson ? ((await response.json()) as T | ApiErrorPayload) : undefined
