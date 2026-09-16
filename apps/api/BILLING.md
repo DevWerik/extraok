@@ -10,7 +10,47 @@ O prestador paga pelo uso do ExtraOK. O pagamento dos serviços extras entre pre
 
 O catálogo oficial da aplicação está em `src/modules/billing/plans.ts`; a interface consulta a API, sem manter outra tabela de preços.
 
-## Regras
+## Benefícios por assinatura
+
+| Benefício | Gratuito | Pro | Negócio |
+| --- | --- | --- | --- |
+| Clientes, extras, aprovação pelo celular, histórico, reenvio e dashboard básico | Sim | Sim | Sim |
+| PDF do atendimento, extras e respostas | — | Sim | Sim |
+| Relatórios por período, cliente e status | — | — | Sim |
+| Exportação dos relatórios em CSV | — | — | Sim |
+
+O catálogo retorna `features` e `benefits` por plano. O resumo `/billing` retorna `current.features`, calculado pelo período pago vigente, sem depender da disponibilidade de novas cobranças Pix. As rotas de cada benefício conferem o plano no servidor e restringem consultas ao proprietário autenticado. Ausência de período, vencimento ou revogação retornam ao Gratuito; um período futuro não antecipa benefícios. Exportar não consome atendimentos com link. Os dados existentes e arquivos já baixados são preservados.
+
+Em `/relatorios`, as datas inicial e final são inclusivas no horário de Brasília e filtram **a data agendada do atendimento**. Os totais representam o estado atual dos extras desses atendimentos, inclusive respostas recebidas fora do período; não representam valores pagos nem são filtrados pela data de resposta. A taxa de aprovação considera apenas extras respondidos. O período máximo é 366 dias; a tela pagina 25 atendimentos e os totais consideram todas as páginas. O CSV exporta todos os resultados dos mesmos filtros, até 5.000 atendimentos, e rejeita volumes maiores sem truncar o arquivo. Usa UTF-8 com BOM, separador `;`, decimal `,` e neutralização de fórmulas de planilha.
+
+O PDF inclui identificação do atendimento, empresa, contatos do cliente, descrição, extras, status, datas de resposta e totais. Não inclui notas internas do cliente, tokens, dados de cobrança nem assinatura digital. Suporta até 500 extras por documento e não comprova pagamento nem substitui nota fiscal. É gerado com [PDFKit](https://pdfkit.org/docs/text.html) e fontes Noto Sans distribuídas pelo Fontsource, sem consultar serviços externos na exportação.
+
+Esta etapa não exige nova migration. Publique primeiro a API (novo catálogo e permissões) e depois o frontend. Modelos de serviços, duplicação e personalização visual não fazem parte desta etapa e não são anunciados nos planos.
+
+## Acesso do proprietário sem cobrança
+
+`BILLING_OWNER_USER_ID` é uma configuração opcional e exclusiva da API. Informe o UUID de uma conta existente para liberar todos os benefícios, sem cota mensal de atendimentos com link e sem vencimento de assinatura. Vazio ou ausente mantém as regras dos planos; valor malformado impede a inicialização da API. A configuração não concede acesso a dados de outras contas e não altera a validade dos links nem limites técnicos das exportações.
+
+Para localizar a conta no banco configurado, execute na raiz:
+
+```powershell
+pnpm.cmd billing:owner seu-email@example.com
+```
+
+O comando lê `apps/api/.env` e variáveis do terminal, busca somente ID e e-mail em uma transação de leitura e imprime `BILLING_OWNER_USER_ID=...`. Não altera contas, pagamentos ou permissões. O identificador deve pertencer à conta desejada no mesmo banco usado pela API.
+
+- Desenvolvimento local: configure `BILLING_OWNER_USER_ID` em `apps/api/.env` e reinicie a API.
+- Produção: configure a variável em **Render → serviço da API → Environment** e reinicie/republique o serviço depois de publicar este código.
+- Docker Compose: configure no `.env` da raiz, que a repassa somente à API. Se o banco do Docker for diferente, localize o ID nesse banco.
+- Não configure essa permissão no frontend, em variáveis `VITE_*`, no cadastro ou no Mercado Pago. O e-mail não concede a isenção; alterar/recriar uma conta com o mesmo e-mail não transfere o acesso.
+
+O resumo autenticado retorna `current.billingExempt=true`, benefícios do Negócio e `null` em limite, saldo, datas e `nextPurchaseStartsAt`. `used` indica o total histórico de atendimentos compartilhados. O catálogo público continua com três planos. A tela **Meu plano** apresenta “Proprietário — acesso completo, sem cobrança”, sem botões para pagar ou renovar. Tentativas de criar pagamentos para a conta isenta retornam `409 BILLING_EXEMPT`, inclusive antes de chamar o provedor. A isenção funciona com `BILLING_ENABLED=false`.
+
+O registro de primeiro compartilhamento é preservado, com `freeMonth` e `periodId` nulos durante a isenção, evitando consumo retroativo. Remover a configuração e reiniciar a API restaura o plano pago vigente ou o Gratuito; reenvios continuam sem novo consumo. Pagamentos e períodos já existentes mantêm estado e datas, inclusive reconciliação de cobranças anteriores. Não há criação de pagamentos aprovados fictícios nem alteração das regras de outras contas.
+
+Esta configuração dispensa nova migration. Para implantação, publique a API e o frontend atualizados antes de habilitar a variável, pois clientes antigos podem não interpretar os campos nulos da isenção.
+
+## Regras dos planos
 
 - Conta sem período pago vigente usa o Gratuito, inclusive depois do vencimento ou reembolso.
 - O consumo acontece na primeira geração de link de um atendimento. Extras, reenvios e rotações desse mesmo atendimento não gastam outra unidade.
@@ -69,6 +109,9 @@ No Docker Compose, use `docker compose exec api node apps/api/dist/scripts/check
 | POST | `/billing/payments` | Conta autenticada; `{ planId, cpf, idempotencyKey }` |
 | GET | `/billing/payments/:id` | Somente dono; consulta e sincronização com intervalo mínimo |
 | POST | `/billing/webhooks/mercadopago?data.id=...` | Assinatura válida; confirmação/reembolso |
+| GET | `/jobs/:id/pdf` | Dono com Pro ou Negócio vigente; PDF para download; 5/min por IP |
+| GET | `/reports/jobs?from=2026-09-01&to=2026-09-30` | Negócio vigente; opcionais `clientId`, `status`, `page`; 30/min por IP |
+| GET | `/reports/jobs.csv?from=2026-09-01&to=2026-09-30` | Negócio vigente; mesmos filtros; exporta todas as páginas; 5/min por IP |
 
 ## Validação
 

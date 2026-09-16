@@ -65,6 +65,7 @@ export const envSchema = z
     RESEND_API_KEY: optionalSetting,
     EMAIL_FROM: optionalSetting,
     BILLING_ENABLED: booleanFromEnvironment.default(false),
+    BILLING_OWNER_USER_ID: optionalSetting.pipe(z.string().uuid().transform((value) => value.toLowerCase()).optional()),
     MERCADOPAGO_ACCESS_TOKEN: optionalSetting,
     MERCADOPAGO_WEBHOOK_SECRET: optionalSetting,
     MERCADOPAGO_COLLECTOR_ID: optionalSetting,

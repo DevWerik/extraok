@@ -13,6 +13,7 @@ import { registerExtraRoutes } from "./modules/extras/routes.js";
 import { registerJobRoutes } from "./modules/jobs/routes.js";
 import { createPixGateway, type PixGateway } from "./modules/billing/mercadopago.js";
 import { registerBillingRoutes } from "./modules/billing/routes.js";
+import { registerReportRoutes } from "./modules/reports/routes.js";
 import { configureSecurity } from "./plugins/security.js";
 import type { PrismaClient } from "./generated/prisma/client.js";
 
@@ -113,6 +114,7 @@ export async function buildApp(
       await registerJobRoutes(api);
       await registerExtraRoutes(api);
       await registerDashboardRoutes(api);
+      await registerReportRoutes(api);
       await registerApprovalRoutes(api);
       await registerBillingRoutes(api, options.pixGateway ?? createPixGateway(env), {
         reconciliationEnabled: options.billingReconciliationEnabled,

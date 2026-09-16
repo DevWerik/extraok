@@ -48,6 +48,10 @@ Gratuito, Pro e Negócio controlam o primeiro link de cada atendimento. A compra
 
 Consulte [Planos e Pix](BILLING.md) para limites, preços, configuração do provedor, variáveis por ambiente e validação antes da ativação.
 
+Pro e Negócio incluem PDF do atendimento; Negócio também inclui relatórios com filtros e exportação CSV. O servidor valida o período vigente em cada exportação. Estes benefícios não consomem a cota de links e não exigem migration adicional.
+
+O acesso do proprietário usa `BILLING_OWNER_USER_ID` somente na API: todos os benefícios, sem cota mensal ou cobrança, preservando o isolamento entre contas. Na raiz, `pnpm.cmd billing:owner seu-email@example.com` localiza o UUID no banco configurado sem alterar dados. A ativação e a remoção estão descritas em [Planos e Pix](BILLING.md).
+
 Na raiz, `pnpm.cmd billing:check` identifica configurações pendentes e confere a migration no banco em modo de leitura, sem gerar pagamentos ou exibir credenciais.
 
 ## Recuperação de senha por e-mail

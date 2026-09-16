@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { BillingPayment, BillingPaymentStatus } from "../../generated/prisma/client.js";
 import { AppError, conflict, notFound } from "../../lib/errors.js";
 import type { AuthUser } from "../../types/fastify.js";
-import { lockBilling, readEntitlement } from "./entitlements.js";
+import { isBillingOwner, lockBilling, readEntitlement } from "./entitlements.js";
 import { BILLING_PLANS, paidPlan, PAID_PERIOD_MS, PIX_EXPIRATION_MS, type PaidPlan } from "./plans.js";
 import { PixGatewayError, type PixGateway, type PixPayment } from "./mercadopago.js";
 
@@ -10,6 +10,13 @@ export function requireBilling(app: FastifyInstance) {
   if (!app.env.BILLING_ENABLED) {
     throw new AppError(503, "PAYMENT_UNAVAILABLE", "O pagamento por Pix está temporariamente indisponível. Seu plano atual continua disponível.");
   }
+}
+
+export function requirePaymentPurchase(app: FastifyInstance, ownerId: string) {
+  if (isBillingOwner(ownerId, app.env)) {
+    throw new AppError(409, "BILLING_EXEMPT", "Sua conta de proprietário já tem acesso completo, sem cobrança.");
+  }
+  requireBilling(app);
 }
 
 export function serializePayment(payment: BillingPayment) {
@@ -28,7 +35,7 @@ export async function billingSummary(app: FastifyInstance, ownerId: string) {
   return app.prisma.$transaction(async (transaction) => {
     await lockBilling(transaction, ownerId);
     const now = new Date();
-    const current = await readEntitlement(transaction, ownerId, now);
+    const current = await readEntitlement(transaction, ownerId, app.env, now);
     const upcoming = await transaction.billingPeriod.findMany({
       where: { ownerId, revokedAt: null, startsAt: { gt: now } },
       select: { id: true, plan: true, startsAt: true, endsAt: true, jobLimit: true },
@@ -37,9 +44,9 @@ export async function billingSummary(app: FastifyInstance, ownerId: string) {
     const payments = await transaction.billingPayment.findMany({ where: { ownerId }, orderBy: { createdAt: "desc" }, take: 20 });
     return {
       plans: BILLING_PLANS, pixAvailable: app.env.BILLING_ENABLED,
-      current: { planId: current.planId, startsAt: current.startsAt, endsAt: current.endsAt, limit: current.limit, used: current.used, remaining: current.remaining },
+      current: { billingExempt: current.billingExempt, planId: current.planId, features: current.features, startsAt: current.startsAt, endsAt: current.endsAt, limit: current.limit, used: current.used, remaining: current.remaining },
       upcoming,
-      nextPurchaseStartsAt: upcoming.at(-1)?.endsAt ?? (current.planId === "free" ? now : current.endsAt),
+      nextPurchaseStartsAt: current.billingExempt ? null : upcoming.at(-1)?.endsAt ?? (current.planId === "free" ? now : current.endsAt),
       payments: payments.map(serializePayment),
     };
   });
@@ -132,7 +139,7 @@ export async function synchronizePayment(app: FastifyInstance, gateway: PixGatew
 
 export async function createPayment(app: FastifyInstance, gateway: PixGateway, user: AuthUser,
   input: { planId: PaidPlan; cpf: string; idempotencyKey: string }) {
-  requireBilling(app);
+  requirePaymentPurchase(app, user.id);
   const plan = paidPlan(input.planId);
   const payment = await app.prisma.$transaction(async (transaction) => {
     await lockBilling(transaction, user.id);

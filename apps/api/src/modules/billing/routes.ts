@@ -5,7 +5,7 @@ import { parseWith } from "../../lib/validation.js";
 import { currentUser, requireAuth } from "../../plugins/auth.js";
 import { BILLING_PLANS, validCpf } from "./plans.js";
 import { validWebhookSignature, type PixGateway } from "./mercadopago.js";
-import { applyVerifiedPayment, billingSummary, createPayment, reconcilePayments, requireBilling, serializePayment, synchronizePayment } from "./service.js";
+import { applyVerifiedPayment, billingSummary, createPayment, reconcilePayments, requireBilling, requirePaymentPurchase, serializePayment, synchronizePayment } from "./service.js";
 
 const purchaseSchema = z.object({
   planId: z.enum(["pro", "business"]),
@@ -26,7 +26,7 @@ export async function registerBillingRoutes(app: FastifyInstance, gateway: PixGa
   });
   app.post("/billing/payments", { preHandler: requireAuth, config: { rateLimit: { max: 10, timeWindow: "1 minute" } } }, async (request, reply) => {
     reply.header("Cache-Control", "no-store");
-    requireBilling(app);
+    requirePaymentPurchase(app, currentUser(request).id);
     const input = parseWith(purchaseSchema, request.body);
     return reply.status(201).send(await createPayment(app, gateway, currentUser(request), input));
   });

@@ -99,7 +99,7 @@ export async function registerApprovalRoutes(
 
       await app.prisma.$transaction(async (transaction) => {
         await lockBilling(transaction, user.id);
-        await consumeApproval(transaction, user.id, jobId);
+        await consumeApproval(transaction, user.id, jobId, app.env);
         // Serializa rotacoes do mesmo atendimento. O indice parcial da migration
         // continua sendo a ultima barreira para garantir apenas um link ativo.
         await transaction.$queryRaw`

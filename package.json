@@ -12,6 +12,7 @@
     "test": "pnpm -r --if-present test",
     "typecheck": "pnpm -r --if-present typecheck",
     "billing:check": "pnpm --filter @extraok/api billing:check",
+    "billing:owner": "pnpm --filter @extraok/api billing:owner",
     "db:generate": "pnpm --filter @extraok/api prisma:generate",
     "db:local:create": "pnpm --dir apps/api exec prisma --config prisma.dev.config.ts dev --detach --name extraok",
     "db:local:start": "pnpm --dir apps/api exec prisma --config prisma.dev.config.ts dev start extraok",
