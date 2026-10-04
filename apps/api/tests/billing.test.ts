@@ -36,7 +36,7 @@ function remotePayment(payment: Pick<BillingPayment, "id" | "priceCents" | "expi
 }
 
 test("catálogo tem três planos, preços em centavos e mês gratuito em São Paulo", () => {
-  assert.deepEqual(BILLING_PLANS.map((plan) => [plan.id, plan.priceCents, plan.jobLimit]), [["free", 0, 3], ["pro", 2990, 50], ["business", 5990, 200]]);
+  assert.deepEqual(BILLING_PLANS.map((plan) => [plan.id, plan.priceCents, plan.jobLimit, plan.durationDays]), [["free", 0, 3, null], ["pro", 999, 50, 30], ["business", 1999, 200, 30]]);
   assert.equal(freeMonthWindow(new Date("2026-10-01T02:59:59Z")).key, "2026-09");
   const month = freeMonthWindow(new Date("2026-10-01T03:00:00Z"));
   assert.equal(month.key, "2026-10");
@@ -80,7 +80,7 @@ test("catálogo público não exige banco; somente webhook exato dispensa Origin
   context.after(() => app.close());
   const catalog = await app.inject({ url: "/api/v1/billing/plans" });
   assert.equal(catalog.statusCode, 200);
-  assert.equal(catalog.json().plans.length, 3);
+  assert.deepEqual(catalog.json().plans, BILLING_PLANS);
   assert.equal((await app.inject({ url: "/api/v1/billing" })).statusCode, 401);
   const unsigned = await app.inject({ method: "POST", url: "/api/v1/billing/webhooks/mercadopago?data.id=1234", payload: {} });
   assert.equal(unsigned.statusCode, 401, unsigned.body);
@@ -91,34 +91,42 @@ test("catálogo público não exige banco; somente webhook exato dispensa Origin
   }
 });
 
-test("gateway envia somente Pix, usa valor do servidor, chave estável e oculta erros externos", async () => {
+test("gateway envia somente Pix, usa valor do servidor, chave estável e oculta erros externos", async (context) => {
   const env = loadEnv(baseEnv);
-  const payment = { id: randomUUID(), plan: "pro", priceCents: 2990, payerEmail: "payer@example.test", payerName: "Pessoa Teste", payerDocument: "52998224725", expiresAt: new Date(Date.now() + 1_800_000) } as BillingPayment;
-  let calls = 0;
-  const gateway = createPixGateway(env, (async (url: string, options: RequestInit) => {
-    calls++;
-    assert.equal(url, "https://api.mercadopago.com/v1/payments");
-    const headers = new Headers(options.headers);
-    assert.equal(headers.get("X-Idempotency-Key"), payment.id);
-    const body = JSON.parse(String(options.body));
-    assert.equal(body.payment_method_id, "pix");
-    assert.equal(body.transaction_amount, 29.9);
-    assert.equal(body.external_reference, payment.id);
-    assert.equal(body.notification_url, baseEnv.MERCADOPAGO_WEBHOOK_URL);
-    assert.equal(body.payer.identification.number, "52998224725");
-    assert.ok(options.signal);
-    return Response.json(remotePayment(payment));
-  }) as typeof fetch);
-  await gateway.create(payment);
-  await gateway.create(payment);
-  assert.equal(calls, 2);
-  const broken = createPixGateway(env, (async () => Response.json({ private: "secret-cpf-provider-details" }, { status: 400 })) as typeof fetch);
-  await assert.rejects(broken.create(payment), (error: Error) => !error.message.includes("secret-cpf") && error.message.includes("Tente novamente"));
+  for (const scenario of [
+    { name: "Pro por R$ 9,99", plan: "pro", priceCents: BILLING_PLANS[1].priceCents, amount: 9.99 },
+    { name: "Negócio por R$ 19,99", plan: "business", priceCents: BILLING_PLANS[2].priceCents, amount: 19.99 },
+    { name: "cobrança anterior preserva o valor original", plan: "pro", priceCents: 2990, amount: 29.90 },
+  ] as const) {
+    await context.test(scenario.name, async () => {
+      const payment = { id: randomUUID(), plan: scenario.plan, priceCents: scenario.priceCents, payerEmail: "payer@example.test", payerName: "Pessoa Teste", payerDocument: "52998224725", expiresAt: new Date(Date.now() + 1_800_000) } as BillingPayment;
+      let calls = 0;
+      const gateway = createPixGateway(env, (async (url: string, options: RequestInit) => {
+        calls++;
+        assert.equal(url, "https://api.mercadopago.com/v1/payments");
+        const headers = new Headers(options.headers);
+        assert.equal(headers.get("X-Idempotency-Key"), payment.id);
+        const body = JSON.parse(String(options.body));
+        assert.equal(body.payment_method_id, "pix");
+        assert.equal(body.transaction_amount, scenario.amount);
+        assert.equal(body.external_reference, payment.id);
+        assert.equal(body.notification_url, baseEnv.MERCADOPAGO_WEBHOOK_URL);
+        assert.equal(body.payer.identification.number, "52998224725");
+        assert.ok(options.signal);
+        return Response.json(remotePayment(payment));
+      }) as typeof fetch);
+      await gateway.create(payment);
+      await gateway.create(payment);
+      assert.equal(calls, 2);
+      const broken = createPixGateway(env, (async () => Response.json({ private: "secret-cpf-provider-details" }, { status: 400 })) as typeof fetch);
+      await assert.rejects(broken.create(payment), (error: Error) => !error.message.includes("secret-cpf") && error.message.includes("Tente novamente"));
+    });
+  }
 });
 
 test("webhook ignora venda sem referência; sincronização de cobrança própria continua exigindo referência", async (context) => {
   const env = loadEnv(baseEnv);
-  const payment = { id: randomUUID(), priceCents: 2990, expiresAt: new Date(Date.now() + 1_800_000) };
+  const payment = { id: randomUUID(), priceCents: 999, expiresAt: new Date(Date.now() + 1_800_000) };
   let externalReference: string | null | undefined = null;
   const gateway = createPixGateway(env, (async () => Response.json({ ...remotePayment(payment), external_reference: externalReference })) as typeof fetch);
   // Invalid DB destination proves these unrelated notifications never access it.

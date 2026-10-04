@@ -5,10 +5,12 @@ O prestador paga pelo uso do ExtraOK. O pagamento dos serviços extras entre pre
 | Plano | Valor | Atendimentos com primeiro link | Período |
 | --- | --- | --- | --- |
 | Gratuito | R$ 0 | 3 | Mês civil no horário de São Paulo |
-| Pro | R$ 29,90 | 50 | 30 dias |
-| Negócio | R$ 59,90 | 200 | 30 dias |
+| Pro | R$ 9,99 | 50 | 30 dias |
+| Negócio | R$ 19,99 | 200 | 30 dias |
 
 O catálogo oficial da aplicação está em `src/modules/billing/plans.ts`; a interface consulta a API, sem manter outra tabela de preços.
+
+Os preços do catálogo valem para novas cobranças. Cobranças já geradas, inclusive Pix pendentes reutilizados, mantêm o valor registrado na criação; a confirmação e o histórico usam esse mesmo valor. Períodos já comprados preservam seus limites e datas.
 
 ## Benefícios por assinatura
 
