@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  loginSchema,
   passwordResetCodeSchema,
   passwordResetConfirmSchema,
   passwordResetRequestSchema,
+  signupSchema,
 } from '../src/features/auth/schemas/auth-schemas.ts'
 import {
   formatCountdown,
@@ -31,18 +33,30 @@ test('OTP entry and paste preserve leading zeros and require exactly eight digit
   }
 })
 
-test('new passwords enforce 12–128 characters and matching confirmation', () => {
-  for (const length of [12, 128]) {
-    const password = 'a'.repeat(length)
-    assert.equal(passwordResetConfirmSchema.safeParse({ password, confirmPassword: password }).success, true)
+test('signup and recovery enforce 8–128 characters and matching confirmation', () => {
+  const signupFields = {
+    name: 'Pessoa Teste', businessName: 'Negócio Teste', email: 'pessoa@example.com',
+    phone: '11999999999', acceptTerms: true,
   }
-  for (const length of [0, 11, 129]) {
-    const password = 'a'.repeat(length)
-    assert.equal(passwordResetConfirmSchema.safeParse({ password, confirmPassword: password }).success, false)
+  for (const schema of [signupSchema, passwordResetConfirmSchema]) {
+    for (const length of [8, 11, 12, 128]) {
+      const password = 'a'.repeat(length)
+      assert.equal(schema.safeParse({ ...signupFields, password, confirmPassword: password }).success, true)
+    }
+    for (const length of [0, 7, 129]) {
+      const password = 'a'.repeat(length)
+      assert.equal(schema.safeParse({ ...signupFields, password, confirmPassword: password }).success, false)
+    }
+    const mismatch = schema.safeParse({ ...signupFields, password: 'Senha123', confirmPassword: 'Senha456' })
+    assert.equal(mismatch.success, false)
+    if (!mismatch.success) assert.deepEqual(mismatch.error.issues[0].path, ['confirmPassword'])
   }
-  const mismatch = passwordResetConfirmSchema.safeParse({ password: 'new-password-123', confirmPassword: 'different-password' })
-  assert.equal(mismatch.success, false)
-  if (!mismatch.success) assert.deepEqual(mismatch.error.issues[0].path, ['confirmPassword'])
+})
+
+test('login accepts eight-character passwords and longer existing passwords without truncating', () => {
+  for (const password of ['Senha123', 'Uma senha existente mais longa']) {
+    assert.equal(loginSchema.parse({ email: 'pessoa@example.com', password }).password, password)
+  }
 })
 
 test('countdowns expire at the deadline even after a background tab resumes', () => {

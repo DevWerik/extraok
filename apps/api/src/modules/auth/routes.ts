@@ -25,7 +25,7 @@ const registerSchema = z.object({
   businessName: z.string().trim().min(2).max(120),
   email: emailSchema,
   phone: z.string().trim().min(10).max(30),
-  password: z.string().min(12).max(128),
+  password: z.string().min(8, "Use pelo menos 8 caracteres.").max(128),
   acceptTerms: z.literal(true, {
     error: "É necessário aceitar os termos para criar a conta.",
   }),

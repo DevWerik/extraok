@@ -21,7 +21,7 @@ const emailSchema = z.string().trim().toLowerCase().max(320).pipe(z.email("Infor
 const requestSchema = z.object({ email: emailSchema });
 const verifySchema = z.object({ email: emailSchema, code: z.string().regex(/^\d{8}$/, "Informe o código de 8 dígitos.") });
 const confirmSchema = z.object({
-  password: z.string().min(12, "Use no mínimo 12 caracteres.").max(128),
+  password: z.string().min(8, "Use no mínimo 8 caracteres.").max(128),
   confirmPassword: z.string().min(1).max(128),
 }).refine((input) => input.password === input.confirmPassword, {
   path: ["confirmPassword"], message: "As senhas devem ser iguais.",
