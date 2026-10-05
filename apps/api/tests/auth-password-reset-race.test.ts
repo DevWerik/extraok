@@ -18,7 +18,7 @@ test("login que validou a senha anterior não cria sessão depois da recuperaç�
   const prisma = createPrismaClient(databaseUrl);
   const email = `race-${randomUUID()}@example.test`;
   const oldPassword = "Old valid password 123!";
-  const newPassword = "New valid password 456!";
+  const newPassword = "NovaSenha456";
   const env = loadEnv({
     NODE_ENV: "test", DATABASE_URL: databaseUrl, WEB_ORIGIN: "https://app.example.test",
     PASSWORD_PEPPER: "p".repeat(32), PASSWORD_RESET_ENABLED: "true",

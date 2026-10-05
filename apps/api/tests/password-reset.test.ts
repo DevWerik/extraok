@@ -31,7 +31,7 @@ const databaseUrl = process.env.TEST_DATABASE_URL;
 const databaseOptions = { skip: databaseUrl ? false : "TEST_DATABASE_URL não definida" };
 const origin = "https://app.extraok.test";
 const oldPassword = "Senha anterior segura 123!";
-const newPassword = "Senha nova segura 456!";
+const newPassword = "NovaSenha123";
 type CodeMessage = Parameters<PasswordResetMailer["sendCode"]>[0];
 
 test("OTP usa oito dígitos e HMAC vinculado ao segredo, usuário e desafio", () => {

@@ -32,7 +32,7 @@ test(
     const suffix = randomUUID();
     const firstEmail = `owner-${suffix}@example.test`;
     const secondEmail = `other-${suffix}@example.test`;
-    const password = "Senha real e segura 123!";
+    const password = "SenhaTeste12";
     const prisma = createPrismaClient(databaseUrl);
     const env = loadEnv({
       NODE_ENV: "production",

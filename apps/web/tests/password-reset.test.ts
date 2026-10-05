@@ -33,17 +33,17 @@ test('OTP entry and paste preserve leading zeros and require exactly eight digit
   }
 })
 
-test('signup and recovery enforce 8–128 characters and matching confirmation', () => {
+test('signup and recovery enforce 8–12 characters and matching confirmation', () => {
   const signupFields = {
     name: 'Pessoa Teste', businessName: 'Negócio Teste', email: 'pessoa@example.com',
     phone: '11999999999', acceptTerms: true,
   }
   for (const schema of [signupSchema, passwordResetConfirmSchema]) {
-    for (const length of [8, 11, 12, 128]) {
+    for (const length of [8, 11, 12]) {
       const password = 'a'.repeat(length)
       assert.equal(schema.safeParse({ ...signupFields, password, confirmPassword: password }).success, true)
     }
-    for (const length of [0, 7, 129]) {
+    for (const length of [0, 7, 13, 128, 129]) {
       const password = 'a'.repeat(length)
       assert.equal(schema.safeParse({ ...signupFields, password, confirmPassword: password }).success, false)
     }
@@ -99,7 +99,7 @@ test('password recovery crosses the site proxy with OTP text and HttpOnly author
       return Response.json({ expiresInSeconds: 300 }, { headers: { 'Set-Cookie': authorizationCookie } })
     }
     assert.equal(request.url, `${apiOrigin}/api/v1/auth/password-reset/confirm`)
-    assert.deepEqual(body, { password: 'new-password-123', confirmPassword: 'new-password-123' })
+    assert.deepEqual(body, { password: 'NovaSenha123', confirmPassword: 'NovaSenha123' })
     assert.equal(request.headers.get('Cookie'), 'extraok_password_reset=test-reset-authorization')
     return new Response(null, { status: 204, headers: { 'Set-Cookie': clearedCookie } })
   })
@@ -123,7 +123,7 @@ test('password recovery crosses the site proxy with OTP text and HttpOnly author
   const verified = await post('verify', { email, code: '00123456' })
   assert.deepEqual(await verified.json(), { expiresInSeconds: 300 })
   assert.equal(verified.headers.get('Set-Cookie'), authorizationCookie)
-  const confirmed = await post('confirm', { password: 'new-password-123', confirmPassword: 'new-password-123' }, 'extraok_password_reset=test-reset-authorization')
+  const confirmed = await post('confirm', { password: 'NovaSenha123', confirmPassword: 'NovaSenha123' }, 'extraok_password_reset=test-reset-authorization')
   assert.equal(confirmed.status, 204)
   assert.equal(await confirmed.text(), '')
   assert.equal(confirmed.headers.get('Set-Cookie'), clearedCookie)

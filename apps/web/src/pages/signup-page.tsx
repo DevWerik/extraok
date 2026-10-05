@@ -67,7 +67,7 @@ export function SignupPage() {
         <SignupField id="signup-email" label="E-mail" error={errors.email?.message}><Input id="signup-email" type="email" autoComplete="email" aria-invalid={Boolean(errors.email)} placeholder="voce@empresa.com.br" {...register('email')} /></SignupField>
         <SignupField id="signup-phone" label="Telefone" error={errors.phone?.message}><Input id="signup-phone" inputMode="tel" autoComplete="tel" aria-invalid={Boolean(errors.phone)} placeholder="(11) 99999-9999" {...register('phone')} /></SignupField>
         <div className="grid gap-4 sm:grid-cols-2">
-          <PasswordField id="signup-password" label="Senha" autoComplete="new-password" registration={register('password')} error={errors.password?.message} hint="Use pelo menos 8 caracteres." />
+          <PasswordField id="signup-password" label="Senha" autoComplete="new-password" registration={register('password')} error={errors.password?.message} hint="Use de 8 a 12 caracteres." />
           <PasswordField id="signup-confirm-password" label="Confirme a senha" autoComplete="new-password" registration={register('confirmPassword')} error={errors.confirmPassword?.message} />
         </div>
         <div>

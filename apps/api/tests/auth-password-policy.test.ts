@@ -7,7 +7,7 @@ import type { PrismaClient } from "../src/generated/prisma/client.js";
 
 const origin = "https://app.extraok.test";
 
-test("cadastro e recuperação aceitam senhas de 8 a 128 caracteres na validação HTTP", async (context) => {
+test("cadastro e recuperação aceitam senhas de 8 a 12 caracteres na validação HTTP", async (context) => {
   let userLookups = 0;
   const prisma = {
     user: {
@@ -30,9 +30,9 @@ test("cadastro e recuperação aceitam senhas de 8 a 128 caracteres na validaç�
   const app = await buildApp({ env, prisma, logger: false, passwordResetDeliveryEnabled: false });
   context.after(() => app.close());
 
-  for (const length of [0, 7, 8, 11, 12, 128, 129]) {
+  for (const length of [0, 7, 8, 11, 12, 13, 128, 129]) {
     const password = "a".repeat(length);
-    const validLength = length >= 8 && length <= 128;
+    const validLength = length >= 8 && length <= 12;
     const registration = await app.inject({
       method: "POST", url: "/api/v1/auth/register", headers: { origin },
       payload: {
@@ -57,5 +57,5 @@ test("cadastro e recuperação aceitam senhas de 8 a 128 caracteres na validaç�
       assert.ok(reset.json().error.fields.password);
     }
   }
-  assert.equal(userLookups, 4);
+  assert.equal(userLookups, 3);
 });

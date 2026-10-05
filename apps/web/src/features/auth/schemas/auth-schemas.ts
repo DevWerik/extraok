@@ -5,7 +5,7 @@ const loginPasswordSchema = z.string().min(1, "Informe sua senha.").max(128, "Se
 const newPasswordSchema = z
   .string()
   .min(8, "Use pelo menos 8 caracteres.")
-  .max(128, "Use no máximo 128 caracteres.")
+  .max(12, "Use no máximo 12 caracteres.")
 
 export const loginSchema = z.object({
   email: emailSchema,
