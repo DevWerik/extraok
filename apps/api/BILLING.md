@@ -93,7 +93,8 @@ No Docker Compose, use `docker compose exec api node apps/api/dist/scripts/check
 
 - `providerApi` registra a API de cada tentativa, e `providerId` guarda o ID da order `ORD...` para novas cobranças. IDs numéricos antigos continuam consultando Payments. Uma tentativa antiga sem ID remoto repete o POST original em Payments com a mesma chave; não cria outra cobrança em Orders. Não altere manualmente esses campos.
 - O backend consulta a order autenticada após a criação e a cada notificação. Só libera o plano quando order e transação estão `processed/accredited` e os valores efetivamente pagos conferem integralmente. `processed/partially_refunded`, reembolso confirmado ou contestação revogam o período conforme a regra existente.
-- Orders nem sempre devolve `live_mode`. Para Pix, o backend confere o modo pela URL de ticket fornecida pela API autenticada (`https://www.mercadopago.com.br/sandbox/payments/.../ticket` ou `/payments/.../ticket`), confrontando `live_mode` quando ele existir. Pedidos de teste também podem usar `ORDTST` seguido de 26 caracteres: esse identificador retornado pela API autenticada comprova sandbox mesmo quando o ticket já não aparece após a aprovação. Qualquer indicação de modo real nesse pedido é rejeitada. O prefixo comum `ORD` não comprova produção. O backend nunca usa o corpo do webhook nem presume que `MERCADOPAGO_LIVE_MODE=true` prove um pagamento real. Ausência de indicadores verificáveis, divergência ou formato desconhecido impede processar uma transação final até que seja possível verificá-la. Homologue esse formato com a credencial da sua aplicação antes de habilitar vendas.
+- Orders nem sempre devolve `live_mode`. Para Pix, o backend confere o modo pela URL de ticket fornecida pela API autenticada (`https://www.mercadopago.com.br/sandbox/payments/.../ticket` ou `/payments/.../ticket`), confrontando `live_mode` quando ele existir. Pedidos de teste também podem usar `ORDTST` seguido de 26 caracteres: esse identificador retornado pela API autenticada comprova sandbox mesmo quando o ticket já não aparece após a aprovação. Qualquer indicação de modo real nesse pedido é rejeitada. O prefixo comum `ORD` não comprova produção.
+- Se uma order com transação omitir esses indicadores, o backend consulta `GET /users/me` com o mesmo token. Exige uma conta brasileira, o mesmo ID de `order.user_id` e a lista `tags` válida: `test_user` identifica o vendedor de teste usado pelo sandbox de Orders. A configuração `MERCADOPAGO_LIVE_MODE` continua sendo comparada com o modo verificado antes de processar a cobrança; não é usada como prova. Conta incompleta, recebedor diferente, divergência de modo ou falha na consulta impede processar o pagamento. Essa consulta não cria cobranças e também atende polling, webhooks e reconciliação. Homologue esse formato com a credencial da sua aplicação antes de habilitar vendas.
 - Orders sem transação pronta ficam aguardando, sem liberação de plano. O ID já salvo permite buscar o QR Code pelo polling/reconciliador, sem novo POST. A falta de imagem não impede o uso do Pix Copia e Cola.
 - A API de Orders não fornece `date_approved` nesse contrato; `approvedAt` registra a atualização autenticada que confirmou a aprovação e é preservado nas consultas seguintes. O período de 30 dias continua começando na concessão local ou depois do último período já comprado.
 
@@ -109,6 +110,25 @@ No Docker Compose, use `docker compose exec api node apps/api/dist/scripts/check
 - O frontend acompanha o pagamento e o backend reconcilia lotes a cada minuto, inclusive sem aba aberta. Cobranças aprovadas de períodos vigentes são revisitadas para recuperar reembolsos. Falhas são tentadas novamente sem criar outro pagamento.
 - Webhooks só recebem sucesso depois de processados. Se banco ou provedor falharem, a resposta de erro permite nova entrega. Monitore falhas no painel do Mercado Pago e os avisos de reconciliação na API. A reconciliação é complementar; mantenha o webhook operacional.
 - Um Pix tem validade inicial de 30 minutos. Ao expirar, não há liberação local; uma confirmação autêntica posterior ainda pode recuperar um pagamento realizado.
+
+## Diagnosticar PAYMENT_UNAVAILABLE em uma cobrança existente
+
+O diagnóstico abaixo autentica a credencial fornecida, busca a referência nas orders dos últimos sete dias e aplica a mesma validação da API às orders encontradas. Usa somente GETs no Mercado Pago: não consulta o banco, não cria nem altera cobranças e não carrega `.env`. A saída contém apenas dados técnicos selecionados, sem token, CPF, e-mail ou código Pix. A busca por referência segue a [documentação oficial de Orders](https://www.mercadopago.com.br/developers/pt/reference/online-payments/checkout-api/search-order/get).
+
+Execute no PowerShell, na raiz do projeto. Substitua `UUID-DA-COBRANCA` pelo ID interno visto em `/billing/payments/:id`. Quando solicitado, cole o mesmo Access Token configurado em **Render → Environment → MERCADOPAGO_ACCESS_TOKEN**; a entrada fica oculta e não é salva no histórico:
+
+```powershell
+$pixDiagnosticoSeguro = Read-Host "Access Token configurado no Render" -AsSecureString
+try {
+    $pixDiagnosticoToken = [System.Net.NetworkCredential]::new('', $pixDiagnosticoSeguro).Password
+    $pixDiagnosticoToken | pnpm.cmd --filter @extraok/api exec tsx src/scripts/diagnose-pix.ts UUID-DA-COBRANCA
+}
+finally {
+    Remove-Variable pixDiagnosticoToken, pixDiagnosticoSeguro -ErrorAction SilentlyContinue
+}
+```
+
+`account.mode=test` identifica uma conta de teste; compare `account.collectorId` com `MERCADOPAGO_COLLECTOR_ID` no Render. `normalized=false` informa a validação que falhou. `provider.statusDetail` e `provider.payments[].statusDetail` mostram códigos técnicos de uma lista restrita dos status documentados; texto livre ou desconhecido aparece como `unrecognized`, sem expor seu conteúdo. `NO_MATCH_IN_LAST_7_DAYS` significa que essa credencial não encontrou a referência nesse intervalo; não prova que o Pix nunca foi criado. Uma consulta local bem-sucedida não comprova as variáveis efetivamente publicadas no Render, a entrega do webhook nem a liberação do plano. Nunca mude a chave de idempotência para contornar o diagnóstico.
 
 ## Endpoints
 
