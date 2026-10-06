@@ -222,6 +222,13 @@ enum BillingPaymentStatus {
   @@map("billing_payment_status")
 }
 
+enum BillingProviderApi {
+  payments
+  orders
+
+  @@map("billing_provider_api")
+}
+
 model BillingPayment {
   id                String               @id @default(uuid()) @db.Uuid
   ownerId           String               @map("owner_id") @db.Uuid
@@ -230,6 +237,7 @@ model BillingPayment {
   jobLimit          Int                  @map("job_limit")
   status            BillingPaymentStatus @default(creating)
   providerId        String?              @unique @map("provider_id") @db.VarChar(64)
+  providerApi       BillingProviderApi   @default(orders) @map("provider_api")
   payerEmail        String               @map("payer_email") @db.VarChar(320)
   payerName         String               @map("payer_name") @db.VarChar(120)
   payerDocument     String?              @map("payer_document") @db.VarChar(11)
