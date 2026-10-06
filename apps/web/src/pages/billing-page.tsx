@@ -12,7 +12,7 @@ import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useBilling, useBillingPayment, useCreatePayment } from '@/features/billing/billing.queries'
 import type { BillingSummary, PaidPlanId, Plan } from '@/features/billing/billing.types'
-import { paymentLabels, pixCountdown, visiblePaymentStatus } from '@/features/billing/billing.utils'
+import { currentPayment, paymentLabels, pixCountdown, recoverPaymentAttempt, visiblePaymentStatus } from '@/features/billing/billing.utils'
 import { PlanCards } from '@/features/billing/plan-cards'
 import { OwnerAccessPanel } from '@/features/billing/owner-access-panel'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
@@ -27,7 +27,19 @@ export function BillingPage() {
   const [cpf, setCpf] = useState('')
   const [selectedPaymentId, setSelectedPaymentId] = useState<string | null>(null)
   const pendingPayment = billing.data?.payments.find((payment) => payment.status === 'pending' || payment.status === 'creating')
-  const paymentId = selectedPaymentId ?? pendingPayment?.id ?? null
+  const recoveredPayment = selection && purchase.isError
+    ? recoverPaymentAttempt(billing.data?.payments ?? [], selection.key, selection.plan.id)
+    : undefined
+  const paymentId = recoveredPayment?.id ?? selectedPaymentId ?? pendingPayment?.id ?? null
+
+  function closePayment() {
+    setSelectedPaymentId(null)
+    if (recoveredPayment) {
+      setSelection(null)
+      setCpf('')
+      purchase.reset()
+    }
+  }
 
   function choosePlan(plan: Plan) {
     if (billing.data?.current.billingExempt) return
@@ -70,7 +82,7 @@ export function BillingPage() {
 
       {data.current.planId !== 'free' && <p className="rounded-xl border bg-card p-4 text-sm text-muted-foreground">Para encerrar o plano, basta não renovar. Você mantém o período pago e depois retorna ao Gratuito. Uma nova compra, inclusive de outro plano, começa após os períodos já pagos; ela não aumenta o limite atual.</p>}
 
-      {paymentId && <PixPaymentPanel key={paymentId} id={paymentId} summary={data} onClose={() => setSelectedPaymentId(null)} />}
+      {paymentId && <PixPaymentPanel key={paymentId} id={paymentId} summary={data} onClose={closePayment} />}
 
       <div className="space-y-5">
         <div><h3 className="text-xl font-bold text-primary">Escolha seu plano</h3><p className="mt-1 text-sm text-muted-foreground">{scheduled ? `Seu próximo período começa em ${nextPurchaseDate}.` : 'Os 30 dias começam quando o pagamento for confirmado.'}</p></div>
@@ -84,12 +96,12 @@ export function BillingPage() {
 
       <div className="space-y-3"><h3 className="text-xl font-bold text-primary">Últimas cobranças</h3>{data.payments.length === 0 ? <p className="text-sm text-muted-foreground">Você ainda não gerou cobranças de plano.</p> : <ul className="divide-y rounded-xl border bg-card">{data.payments.map((payment) => <li key={payment.id} className="flex flex-wrap items-center justify-between gap-3 p-4"><div><p className="font-semibold text-primary">{data.plans.find((plan) => plan.id === payment.planId)?.name} · {formatCurrency(payment.priceCents)}</p><p className="mt-1 text-xs text-muted-foreground">{formatDateTime(payment.createdAt)} · {paymentLabels[payment.status]}</p></div><Button size="sm" variant="outline" onClick={() => setSelectedPaymentId(payment.id)}>Ver cobrança</Button></li>)}</ul>}</div>
 
-      <Dialog open={Boolean(selection)} onOpenChange={(open) => { if (!open && !purchase.isPending) { setSelection(null); setCpf(''); purchase.reset() } }}>
+      <Dialog open={Boolean(selection) && !recoveredPayment} onOpenChange={(open) => { if (!open && !purchase.isPending) { setSelection(null); setCpf(''); purchase.reset() } }}>
         <DialogContent>
           <DialogHeader><DialogTitle>Pagar {selection?.plan.name} com Pix</DialogTitle><DialogDescription>{selection && formatCurrency(selection.plan.priceCents)} por 30 dias, com até {selection?.plan.jobLimit} atendimentos com link. Sem renovação automática.</DialogDescription></DialogHeader>
           <p className="rounded-lg bg-muted p-3 text-sm">{scheduled ? `O período será adicionado após os já pagos, a partir de ${nextPurchaseDate}. O novo limite e os benefícios começam nessa data.` : 'Seu plano será liberado depois da confirmação do pagamento.'}</p>
           <form onSubmit={(event) => void submit(event)} className="space-y-4">
-            <div className="space-y-2"><Label htmlFor="billing-cpf">CPF do pagador</Label><Input id="billing-cpf" name="cpf" inputMode="numeric" autoComplete="off" maxLength={14} value={cpf} onChange={(event) => setCpf(event.target.value.replace(/[^\d.-]/g, '').slice(0, 14))} required disabled={purchase.isPending} aria-describedby="billing-cpf-help billing-form-error" /><p id="billing-cpf-help" className="text-xs text-muted-foreground">Usado para gerar sua cobrança no Mercado Pago.</p></div>
+            <div className="space-y-2"><Label htmlFor="billing-cpf">CPF do pagador</Label><Input id="billing-cpf" name="cpf" inputMode="numeric" autoComplete="off" maxLength={14} value={cpf} onChange={(event) => setCpf(event.target.value.replace(/[^\d.-]/g, '').slice(0, 14))} required disabled={purchase.isPending} aria-describedby="billing-cpf-help billing-form-error" /><p id="billing-cpf-help" className="text-xs text-muted-foreground">Usaremos o nome e o e-mail do seu cadastro. Informe o CPF da mesma pessoa.</p></div>
             <div id="billing-form-error" role="alert">{purchase.isError && <p className="text-sm text-destructive">{isServiceError(purchase.error) ? purchase.error.message : 'Não foi possível gerar o Pix. Tente novamente.'}</p>}</div>
             <Button type="submit" className="w-full" disabled={purchase.isPending || cpf.replace(/\D/g, '').length !== 11}><QrCode className="size-4" aria-hidden="true" />{purchase.isPending ? 'Gerando Pix...' : `Gerar Pix de ${selection ? formatCurrency(selection.plan.priceCents) : ''}`}</Button>
           </form>
@@ -100,11 +112,12 @@ export function BillingPage() {
 }
 
 function PixPaymentPanel({ id, summary, onClose }: { id: string; summary: BillingSummary; onClose: () => void }) {
-  const query = useBillingPayment(id)
+  const summaryPayment = summary.payments.find((entry) => entry.id === id)
+  const query = useBillingPayment(id, summaryPayment)
   const client = useQueryClient()
   const { copy, copied } = useCopyToClipboard()
   const [now, setNow] = useState(() => Date.now())
-  const payment = query.data ?? summary.payments.find((entry) => entry.id === id)
+  const payment = currentPayment(query.data, summaryPayment)
   const status = payment ? visiblePaymentStatus(payment.status, payment.expiresAt, now) : undefined
 
   useEffect(() => {
@@ -126,12 +139,12 @@ function PixPaymentPanel({ id, summary, onClose }: { id: string; summary: Billin
   return <Card className="border-success/30" aria-label="Cobrança Pix">
     <CardHeader><h3 className="text-xl font-bold text-primary">{status ? paymentLabels[status] : 'Consultando cobrança...'}</h3>{payment && <p className="text-sm text-muted-foreground">{summary.plans.find((plan) => plan.id === payment.planId)?.name} · {formatCurrency(payment.priceCents)}</p>}</CardHeader>
     <CardContent className="space-y-4">
-      <div role="status" aria-live="polite">{status === 'approved' ? <p className="flex items-start gap-2 font-semibold text-success"><CheckCircle2 className="size-5 shrink-0" aria-hidden="true" />Pagamento confirmado. Consulte acima a validade do período liberado.</p> : status === 'creating' ? <p>Estamos preparando sua cobrança. Ela aparecerá aqui automaticamente.</p> : status === 'pending' ? <p className="text-sm">Escaneie o QR Code no aplicativo do seu banco ou use o Pix Copia e Cola. A confirmação aparecerá automaticamente.</p> : status === 'expired' ? <p className="text-sm">A validade deste Pix terminou. Se você já pagou, atualize a cobrança antes de gerar outro Pix.</p> : status === 'refunded' ? <p className="text-sm">O período desta cobrança foi desativado após o reembolso. Seu histórico de atendimentos foi preservado.</p> : status ? <p className="text-sm">Esta cobrança não liberou um plano. Você pode escolher uma nova opção acima.</p> : null}</div>
+      <div role="status" aria-live="polite">{status === 'approved' ? <p className="flex items-start gap-2 font-semibold text-success"><CheckCircle2 className="size-5 shrink-0" aria-hidden="true" />Pagamento confirmado. Consulte acima a validade do período liberado.</p> : status === 'creating' ? <p>Estamos preparando sua cobrança. Ela aparecerá aqui automaticamente.</p> : status === 'pending' ? <p className="text-sm">Escaneie o QR Code no aplicativo do seu banco ou use o Pix Copia e Cola. A confirmação aparecerá automaticamente.</p> : status === 'expired' ? <p className="text-sm">A validade deste Pix terminou. Se você já pagou, atualize a cobrança antes de gerar outro Pix.</p> : status === 'rejected' ? <p className="text-sm">O Mercado Pago não aprovou esta cobrança. Nenhum plano foi liberado. Confira os dados do titular do cadastro e evite tentativas seguidas. Se a recusa persistir, entre em contato com o suporte.</p> : status === 'refunded' ? <p className="text-sm">O período desta cobrança foi desativado após o reembolso. Seu histórico de atendimentos foi preservado.</p> : status ? <p className="text-sm">Esta cobrança não liberou um plano. Você pode escolher uma nova opção acima.</p> : null}</div>
       {payment && status === 'pending' && payment.qrCode && <div className="grid items-center gap-5 sm:grid-cols-[12rem_1fr]">
         {payment.qrCodeBase64 && <img src={`data:image/png;base64,${payment.qrCodeBase64}`} alt={`QR Code para pagar ${formatCurrency(payment.priceCents)} via Pix`} width={192} height={192} className="mx-auto rounded-lg border bg-white p-2" />}
         <div className="min-w-0 space-y-3"><p className="text-sm font-semibold">Validade: <span className="tabular-nums">{pixCountdown(payment.expiresAt, now)}</span></p><Label htmlFor={`pix-code-${id}`}>Pix Copia e Cola</Label><textarea id={`pix-code-${id}`} readOnly value={payment.qrCode} className="min-h-24 w-full resize-none rounded-lg border bg-muted p-3 text-xs break-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onFocus={(event) => event.target.select()} /><Button onClick={() => void copyPix()} className="w-full sm:w-auto"><Copy className="size-4" aria-hidden="true" />{copied ? 'Pix copiado' : 'Copiar código Pix'}</Button></div>
       </div>}
-      {query.isError && <p className="text-sm text-destructive" role="alert">Não foi possível atualizar a cobrança. Se já pagou, aguarde a confirmação antes de tentar outro pagamento.</p>}
+      {query.isError && (!status || ['creating', 'pending', 'expired'].includes(status)) && <p className="text-sm text-destructive" role="alert">Não foi possível atualizar a cobrança. Se já pagou, aguarde a confirmação antes de tentar outro pagamento.</p>}
       <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={query.isFetching} onClick={() => void query.refetch()}><RefreshCw className="size-4" aria-hidden="true" />{query.isFetching ? 'Consultando...' : 'Atualizar pagamento'}</Button>{status === 'approved' && <Button asChild><Link to="/atendimentos">Ir aos atendimentos</Link></Button>}{status && !['creating', 'pending'].includes(status) && <Button variant="ghost" onClick={onClose}>Fechar cobrança</Button>}</div>
     </CardContent>
   </Card>
