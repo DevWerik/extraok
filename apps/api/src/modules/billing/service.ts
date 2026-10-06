@@ -5,6 +5,7 @@ import type { AuthUser } from "../../types/fastify.js";
 import { isBillingOwner, lockBilling, readEntitlement } from "./entitlements.js";
 import { BILLING_PLANS, paidPlan, PAID_PERIOD_MS, PIX_EXPIRATION_MS, type PaidPlan } from "./plans.js";
 import { PixGatewayError, type PixGateway, type PixPayment } from "./mercadopago.js";
+import { orderIdPattern } from "./orders.js";
 
 export function requireBilling(app: FastifyInstance) {
   if (!app.env.BILLING_ENABLED) {
@@ -24,7 +25,7 @@ export function serializePayment(payment: BillingPayment) {
   const expired = pending && payment.expiresAt.getTime() <= Date.now();
   return {
     id: payment.id, planId: payment.plan, priceCents: payment.priceCents,
-    status: expired ? "expired" as const : payment.status,
+    status: expired ? "expired" as const : pending && !payment.qrCode ? "creating" as const : payment.status,
     createdAt: payment.createdAt, approvedAt: payment.approvedAt, expiresAt: payment.expiresAt,
     qrCode: pending && !expired ? payment.qrCode : null,
     qrCodeBase64: pending && !expired ? payment.qrCodeBase64 : null,
@@ -67,10 +68,13 @@ export async function applyVerifiedPayment(app: FastifyInstance, remote: PixPaym
   const payment = await app.prisma.billingPayment.findUnique({ where: { id: remote.external_reference } });
   if (!payment) return null; // Other sales on the same merchant account are unrelated.
   const cents = remote.transaction_amount * 100;
+  const awaitingTransaction = orderIdPattern.test(remote.id) && remote.status === "processing" && remote.payment_method_id === null;
   if ((expectedId && payment.id !== expectedId) ||
+    payment.providerApi !== (orderIdPattern.test(remote.id) ? "orders" : "payments") ||
     (payment.providerId && payment.providerId !== remote.id) ||
     remote.collector_id !== app.env.MERCADOPAGO_COLLECTOR_ID ||
-    remote.live_mode !== app.env.MERCADOPAGO_LIVE_MODE || remote.payment_method_id !== "pix" ||
+    (remote.live_mode !== app.env.MERCADOPAGO_LIVE_MODE && !(awaitingTransaction && remote.live_mode === null)) ||
+    (remote.payment_method_id !== "pix" && !awaitingTransaction) ||
     remote.currency_id !== "BRL" || Math.abs(cents - payment.priceCents) > 0.000001) {
     throw new AppError(409, "PAYMENT_MISMATCH", "A cobrança não corresponde ao plano solicitado. Entre em contato com o suporte.");
   }
@@ -96,7 +100,7 @@ export async function applyVerifiedPayment(app: FastifyInstance, remote: PixPaym
       data: {
         providerId: remote.id, status, providerUpdatedAt, lastCheckedAt: now,
         payerDocument: null,
-        approvedAt: remote.date_approved ? new Date(remote.date_approved) : current.approvedAt,
+        approvedAt: current.approvedAt ?? (remote.date_approved ? new Date(remote.date_approved) : null),
         qrCode: status === "pending" ? pix?.qr_code ?? current.qrCode : null,
         qrCodeBase64: status === "pending" ? pix?.qr_code_base64 ?? current.qrCodeBase64 : null,
         ...(remote.date_of_expiration ? { expiresAt: new Date(remote.date_of_expiration) } : {}),
@@ -161,7 +165,7 @@ export async function createPayment(app: FastifyInstance, gateway: PixGateway, u
     }
     return transaction.billingPayment.create({
       data: {
-        id: input.idempotencyKey, ownerId: user.id, plan: input.planId, priceCents: plan.priceCents, jobLimit: plan.jobLimit,
+        id: input.idempotencyKey, ownerId: user.id, providerApi: "orders", plan: input.planId, priceCents: plan.priceCents, jobLimit: plan.jobLimit,
         payerEmail: user.email, payerName: user.name, payerDocument: input.cpf,
         expiresAt: new Date(now.getTime() + PIX_EXPIRATION_MS),
       },
@@ -169,7 +173,8 @@ export async function createPayment(app: FastifyInstance, gateway: PixGateway, u
   });
   if (payment.status !== "creating" && payment.status !== "pending") return serializePayment(payment);
   const updated = await synchronizePayment(app, gateway, payment);
-  if (updated.status === "pending" && (!updated.qrCode || !updated.qrCodeBase64)) throw new PixGatewayError();
+  // Orders can finish generating the Pix asynchronously. The existing UI polls
+  // a "creating" response; QR image absence still allows Pix Copia e Cola.
   return serializePayment(updated);
 }
 

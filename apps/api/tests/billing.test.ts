@@ -99,7 +99,7 @@ test("gateway envia somente Pix, usa valor do servidor, chave estável e oculta 
     { name: "cobrança anterior preserva o valor original", plan: "pro", priceCents: 2990, amount: 29.90 },
   ] as const) {
     await context.test(scenario.name, async () => {
-      const payment = { id: randomUUID(), plan: scenario.plan, priceCents: scenario.priceCents, payerEmail: "payer@example.test", payerName: "Pessoa Teste", payerDocument: "52998224725", expiresAt: new Date(Date.now() + 1_800_000) } as BillingPayment;
+      const payment = { id: randomUUID(), providerApi: "payments", plan: scenario.plan, priceCents: scenario.priceCents, payerEmail: "payer@example.test", payerName: "Pessoa Teste", payerDocument: "52998224725", expiresAt: new Date(Date.now() + 1_800_000) } as BillingPayment;
       let calls = 0;
       const gateway = createPixGateway(env, (async (url: string, options: RequestInit) => {
         calls++;
@@ -160,7 +160,7 @@ async function fixture(context: TestContext) {
   const gateway: PixGateway = {
     async create(payment) {
       let remote = [...remotes.values()].find((entry) => entry.external_reference === payment.id);
-      if (!remote) { remote = remotePayment(payment, String(++sequence)); remotes.set(remote.id, remote); createdKeys.add(payment.id); }
+      if (!remote) { remote = remotePayment(payment, `ORD${String(++sequence).padStart(26, "0")}`); remotes.set(remote.id, remote); createdKeys.add(payment.id); }
       if (failAfterCreate) { failAfterCreate = false; throw new Error("response lost"); }
       return structuredClone(remote);
     },

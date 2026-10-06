@@ -5,6 +5,7 @@ import { parseWith } from "../../lib/validation.js";
 import { currentUser, requireAuth } from "../../plugins/auth.js";
 import { BILLING_PLANS, validCpf } from "./plans.js";
 import { validWebhookSignature, type PixGateway } from "./mercadopago.js";
+import { providerResourceIdPattern } from "./orders.js";
 import { applyVerifiedPayment, billingSummary, createPayment, reconcilePayments, requireBilling, requirePaymentPurchase, serializePayment, synchronizePayment } from "./service.js";
 
 const purchaseSchema = z.object({
@@ -13,7 +14,7 @@ const purchaseSchema = z.object({
   idempotencyKey: z.string().uuid(),
 }).strict();
 const idSchema = z.object({ id: z.string().uuid() });
-const notificationSchema = z.object({ "data.id": z.string().regex(/^\d{1,64}$/) });
+const notificationSchema = z.object({ "data.id": z.string().regex(providerResourceIdPattern) });
 
 export async function registerBillingRoutes(app: FastifyInstance, gateway: PixGateway, options: { reconciliationEnabled?: boolean } = {}) {
   app.get("/billing/plans", async (_request, reply) => {
@@ -49,7 +50,7 @@ export async function registerBillingRoutes(app: FastifyInstance, gateway: PixGa
     if (!validWebhookSignature(app.env.MERCADOPAGO_WEBHOOK_SECRET!, typeof signature === "string" ? signature : undefined,
       typeof requestId === "string" ? requestId : undefined, query["data.id"])) throw unauthorized("Notificação inválida.");
     const remote = await gateway.get(query["data.id"]);
-    if (remote.id !== query["data.id"]) throw unauthorized("Notificação inválida.");
+    if (remote.id.toLowerCase() !== query["data.id"].toLowerCase()) throw unauthorized("Notificação inválida.");
     await applyVerifiedPayment(app, remote);
     return reply.status(200).send({ received: true });
   });
