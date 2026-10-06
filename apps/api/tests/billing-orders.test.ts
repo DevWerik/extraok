@@ -68,6 +68,7 @@ test("Orders cria Pix com centavos exatos, expiração estável e consulta o mes
     const local = {
       id: randomUUID(), providerApi: "orders", plan: "pro", priceCents,
       payerName: "Pessoa Teste", payerEmail: "payer@example.test", payerDocument: "52998224725",
+      payerDeviceId: "device-session-test-123",
       expiresAt: new Date(Date.now() + 1_800_000),
     } as BillingPayment;
     const bodies: string[] = [];
@@ -80,6 +81,7 @@ test("Orders cria Pix com centavos exatos, expiração estável e consulta o mes
       if (options?.method === "POST") {
         assert.equal(String(url), "https://api.mercadopago.com/v1/orders");
         assert.equal(new Headers(options.headers).get("X-Idempotency-Key"), local.id);
+        assert.equal(new Headers(options.headers).get("X-meli-session-id"), local.payerDeviceId);
         bodies.push(String(options.body));
         const body = JSON.parse(String(options.body));
         assert.equal(body.type, "online");
@@ -88,10 +90,13 @@ test("Orders cria Pix com centavos exatos, expiração estável e consulta o mes
         assert.equal(body.external_reference, local.id);
         assert.deepEqual(body.transactions.payments, [{ amount: body.total_amount, payment_method: { id: "pix", type: "bank_transfer" }, expiration_time: "PT30M" }]);
         assert.equal(body.payer.identification.number, local.payerDocument);
+        assert.equal(body.payer.first_name, "Pessoa");
+        assert.equal(body.payer.last_name, "Teste");
         assert.equal(body.notification_url, undefined);
         return Response.json({ id: orderId, status: "processing" }, { status: 201 });
       }
       assert.equal(String(url), `https://api.mercadopago.com/v1/orders/${orderId}`);
+      assert.equal(new Headers(options?.headers).get("X-meli-session-id"), null);
       return Response.json(pixOrder(local.id, (priceCents / 100).toFixed(2)));
     }) as typeof fetch);
     const result = await gateway.create(local);
@@ -103,6 +108,59 @@ test("Orders cria Pix com centavos exatos, expiração estável e consulta o mes
     assert.equal(bodies[0], bodies[1]);
     assert.equal(paths.length, 4);
   }
+});
+
+test("Orders consulta HTTP 402 criado e preserva a recusa high_risk da transação", async () => {
+  const local = { id: randomUUID(), providerApi: "orders", plan: "pro", priceCents: 999,
+    payerName: "João da Silva", payerEmail: "payer@example.test", payerDocument: "52998224725",
+    payerDeviceId: "device-session-test-123", expiresAt: new Date(Date.now() + 1_800_000) } as BillingPayment;
+  for (const detail of ["high_risk", "rejected_high_risk"]) {
+    const remote = pixOrder(local.id);
+    remote.status = remote.transactions.payments[0].status = "failed";
+    remote.status_detail = "failed";
+    remote.transactions.payments[0].status_detail = detail;
+    remote.transactions.payments[0].payment_method.qr_code = "";
+    remote.transactions.payments[0].payment_method.qr_code_base64 = "";
+    const requests: string[] = [];
+    const gateway = createPixGateway(env, (async (url, options) => {
+      requests.push(`${options?.method} ${url}`);
+      if (options?.method === "POST") {
+        return Response.json({ id: orderId, errors: [{ message: "private-provider-details" }] }, { status: 402 });
+      }
+      return Response.json(remote);
+    }) as typeof fetch);
+    const payment = await gateway.create(local);
+    assert.equal(payment.status, "rejected");
+    assert.equal(payment.status_detail, "high_risk");
+    assert.equal(payment.external_reference, local.id);
+    assert.equal(JSON.stringify(payment).includes("private-provider-details"), false);
+    assert.deepEqual(requests, ["POST https://api.mercadopago.com/v1/orders", `GET https://api.mercadopago.com/v1/orders/${orderId}`]);
+  }
+});
+
+test("Orders não infere uma recusa de HTTP 402 sem ID válido ou sem GET verificável", async () => {
+  const local = { id: randomUUID(), providerApi: "orders", plan: "pro", priceCents: 999,
+    payerName: "Pessoa Teste", payerEmail: "payer@example.test", payerDocument: "52998224725" } as BillingPayment;
+  for (const body of [{ errors: [{ code: "high_risk" }] }, { id: "../../users/me" }, { id: orderId }]) {
+    let posts = 0;
+    const gateway = createPixGateway(env, (async (_url, options) => {
+      if (options?.method === "POST") { posts++; return Response.json(body, { status: 402 }); }
+      return Response.json({ private: "private-provider-details" }, { status: 503 });
+    }) as typeof fetch);
+    await assert.rejects(gateway.create(local), (error: Error & { code?: string }) => error.code === "PAYMENT_UNAVAILABLE" && !error.message.includes("private-provider-details"));
+    assert.equal(posts, 1);
+  }
+});
+
+test("gateway não inventa sobrenome nem envia Device ID inválido", async () => {
+  let calls = 0;
+  const gateway = createPixGateway(env, (async () => { calls++; throw new Error("unexpected transport"); }) as typeof fetch);
+  for (const overrides of [{ payerName: "Pessoa" }, { payerName: "Pessoa Teste", payerDeviceId: "device\r\nAuthorization: forged" }]) {
+    const local = { id: randomUUID(), providerApi: "orders", plan: "pro", priceCents: 999,
+      payerEmail: "payer@example.test", payerDocument: "52998224725", ...overrides } as BillingPayment;
+    await assert.rejects(gateway.create(local), (error: { code?: string }) => error.code === "PAYER_DATA_REQUIRED");
+  }
+  assert.equal(calls, 0);
 });
 
 test("Orders recupera pedido ORDTST aprovado sem ticket e preserva a validação de modo", async () => {
@@ -408,7 +466,7 @@ test(`Orders ${providerOrderId.slice(0, -26)} ${accountFallback ? "conta real au
 test("Payments legado conserva API, idempotência e valor após a migration", { skip: !databaseUrl && "TEST_DATABASE_URL não definida" }, async (context) => {
   const prisma = createPrismaClient(databaseUrl!);
   const user = await prisma.user.create({ data: { name: "Legado", businessName: "Teste", email: `legacy-${randomUUID()}@example.test`, phone: "11999999999", passwordHash: "unused", termsAcceptedAt: new Date(), termsVersion: "test" } });
-  const payment = await prisma.billingPayment.create({ data: { ownerId: user.id, providerApi: "payments", plan: "pro", priceCents: 2990, jobLimit: 50, payerName: "Legado", payerEmail: user.email, payerDocument: "52998224725", expiresAt: new Date(Date.now() + 1_800_000) } });
+  const payment = await prisma.billingPayment.create({ data: { ownerId: user.id, providerApi: "payments", plan: "pro", priceCents: 2990, jobLimit: 50, payerName: "Pessoa Legado", payerEmail: user.email, payerDocument: "52998224725", expiresAt: new Date(Date.now() + 1_800_000) } });
   const gateway = createPixGateway(env, (async (url, options) => {
     assert.equal(String(url), options?.method === "POST" ? "https://api.mercadopago.com/v1/payments" : "https://api.mercadopago.com/v1/payments/987654321");
     if (options?.method === "POST") {

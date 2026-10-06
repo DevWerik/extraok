@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { isFullName, normalizeFullName } from '../../../lib/person-name.ts'
 
 const emailSchema = z.string().trim().email("Informe um e-mail válido.")
 const loginPasswordSchema = z.string().min(1, "Informe sua senha.").max(128, "Senha inválida.")
@@ -20,7 +21,7 @@ export const signupSchema = z
     businessName: z.string().trim().min(2, "Informe o nome do negócio."),
     confirmPassword: z.string(),
     email: emailSchema,
-    name: z.string().trim().min(3, "Informe seu nome completo."),
+    name: z.string().transform(normalizeFullName).refine(isFullName, 'Informe seu nome completo, com nome e sobrenome.'),
     password: newPasswordSchema,
     phone: z
       .string()

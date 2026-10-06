@@ -47,7 +47,7 @@ async function main() {
         const tables = schema.rows[0]!;
         report(Boolean(tables.payments && tables.periods && tables.usage), "Tabelas de planos e consumo presentes no banco configurado");
         if (tables.migrations) {
-          for (const name of ["0003_pix_billing", "0004_pix_orders"]) {
+          for (const name of ["0003_pix_billing", "0004_pix_orders", "0005_pix_risk_data"]) {
             const migration = await client.query<{ checksum: string; finished_at: Date | null; rolled_back_at: Date | null }>(
               "SELECT checksum, finished_at, rolled_back_at FROM _prisma_migrations WHERE migration_name = $1 AND rolled_back_at IS NULL ORDER BY started_at DESC LIMIT 1",
               [name],

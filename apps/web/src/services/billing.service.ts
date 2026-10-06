@@ -8,7 +8,7 @@ export const billingService = {
   summary(signal?: AbortSignal) {
     return apiRequest<BillingSummary>('/billing', { signal })
   },
-  createPayment(input: { planId: PaidPlanId; cpf: string; idempotencyKey: string }) {
+  createPayment(input: { planId: PaidPlanId; cpf: string; idempotencyKey: string; payerName: string; deviceId: string }) {
     return apiRequest<BillingPayment>('/billing/payments', { method: 'POST', body: input })
   },
   payment(id: string, signal?: AbortSignal) {

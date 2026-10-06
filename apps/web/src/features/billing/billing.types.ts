@@ -29,6 +29,8 @@ export interface BillingPayment {
   expiresAt: string
   qrCode: string | null
   qrCodeBase64: string | null
+  rejectionReason: 'high_risk' | null
+  retryAvailableAt: string | null
 }
 export type BillingCurrent = {
   planId: PlanId
@@ -53,4 +55,5 @@ export interface BillingSummary extends PlansCatalog {
   upcoming: { id: string; plan: PaidPlanId; startsAt: string; endsAt: string; jobLimit: number }[]
   nextPurchaseStartsAt: string | null
   payments: BillingPayment[]
+  retryAvailableAt: string | null
 }

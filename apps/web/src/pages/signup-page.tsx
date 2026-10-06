@@ -61,7 +61,7 @@ export function SignupPage() {
     >
       <form className="space-y-5" onSubmit={handleSubmit(onSubmit)} noValidate>
         <div className="grid gap-4 sm:grid-cols-2">
-          <SignupField id="signup-name" label="Seu nome" error={errors.name?.message}><Input id="signup-name" autoComplete="name" aria-invalid={Boolean(errors.name)} placeholder="Marcos Almeida" {...register('name')} /></SignupField>
+          <SignupField id="signup-name" label="Nome completo" error={errors.name?.message}><Input id="signup-name" autoComplete="name" maxLength={100} aria-invalid={Boolean(errors.name)} placeholder="Marcos Almeida" {...register('name')} /></SignupField>
           <SignupField id="signup-business" label="Nome do negócio" error={errors.businessName?.message}><Input id="signup-business" autoComplete="organization" aria-invalid={Boolean(errors.businessName)} placeholder="Clima Certo" {...register('businessName')} /></SignupField>
         </div>
         <SignupField id="signup-email" label="E-mail" error={errors.email?.message}><Input id="signup-email" type="email" autoComplete="email" aria-invalid={Boolean(errors.email)} placeholder="voce@empresa.com.br" {...register('email')} /></SignupField>

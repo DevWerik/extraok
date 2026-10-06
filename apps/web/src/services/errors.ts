@@ -14,6 +14,8 @@ export type ServiceErrorCode =
   | 'BILLING_EXEMPT'
   | 'PAYMENT_UNAVAILABLE'
   | 'PAYMENT_MISMATCH'
+  | 'PAYER_DATA_REQUIRED'
+  | 'PAYMENT_RETRY_LATER'
 
 export class ServiceError extends Error {
   readonly code: ServiceErrorCode

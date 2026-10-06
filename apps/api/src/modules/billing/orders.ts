@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { PixPayment } from "./mercadopago.js";
 import { PIX_EXPIRATION_MS } from "./plans.js";
+import { isHighRisk } from "./payment-risk.js";
 
 // Sandbox orders include TST before the 26-character resource identifier.
 export const orderIdPattern = /^ORD(?:TST)?[A-Z0-9]{26}$/i;
@@ -140,7 +141,9 @@ export function normalizeOrder(data: unknown, account?: OrderAccount): PixPaymen
     transaction_amount: order.total_amount / 100,
     transaction_amount_refunded: refundedCents / 100,
     status: normalizedStatus,
-    status_detail: statuses.includes("expired") ? "expired" : order.status_detail,
+    status_detail: statuses.includes("expired") ? "expired"
+      : normalizedStatus === "rejected" && details.some(isHighRisk) ? "high_risk"
+      : normalizedStatus === "rejected" ? payment?.status_detail ?? order.status_detail : order.status_detail,
     date_last_updated: order.last_updated_date,
     // Orders has no date_approved. Record the provider update that confirms
     // accreditation; service.ts preserves it on subsequent notifications.

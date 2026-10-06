@@ -3,6 +3,8 @@ import { z } from "zod";
 import type { Env } from "../../config/env.js";
 import type { BillingPayment } from "../../generated/prisma/client.js";
 import { AppError } from "../../lib/errors.js";
+import { fullNameSchema } from "../../lib/person-name.js";
+import { deviceIdPattern } from "./payment-risk.js";
 import { normalizeOrder, normalizeOrderAccount, OrderModeUnavailableError, orderIdPattern, providerResourceIdPattern } from "./orders.js";
 
 const providerId = z.union([z.string().regex(/^\d{1,64}$/), z.number().int().positive().max(Number.MAX_SAFE_INTEGER)]).transform(String);
@@ -54,6 +56,12 @@ export function createPixGateway(env: Env, transport: typeof fetch = fetch): Pix
         signal: AbortSignal.timeout(8_000),
         redirect: "error",
       });
+      // Orders documents HTTP 402 as an order created with a failed transaction.
+      // Extract only its ID, then GET the resource and verify the full contract.
+      // Never infer rejection or grant access from an error body alone.
+      if (response.status === 402 && path === "/v1/orders" && options.method === "POST") {
+        return z.object({ id: z.string().regex(orderIdPattern) }).parse(await response.json());
+      }
       if (!response.ok) throw new PixGatewayError();
       return await response.json();
     } catch {
@@ -76,9 +84,18 @@ export function createPixGateway(env: Env, transport: typeof fetch = fetch): Pix
   }
   return {
     async create(payment) {
-      const [firstName, ...rest] = payment.payerName.trim().split(/\s+/);
+      const name = fullNameSchema.safeParse(payment.payerName);
+      if (!name.success) throw new AppError(400, "PAYER_DATA_REQUIRED", "Confira o nome completo do pagador antes de gerar o Pix.");
+      if (payment.payerDeviceId && !deviceIdPattern.test(payment.payerDeviceId)) {
+        throw new AppError(400, "PAYER_DATA_REQUIRED", "Não foi possível preparar o pagamento. Atualize a página e tente novamente.");
+      }
+      const [firstName, ...rest] = name.data.split(" ");
+      const headers = {
+        "X-Idempotency-Key": payment.id,
+        ...(payment.payerDeviceId ? { "X-meli-session-id": payment.payerDeviceId } : {}),
+      };
       const payer = {
-        email: payment.payerEmail, first_name: firstName, last_name: rest.join(" ") || firstName,
+        email: payment.payerEmail, first_name: firstName, last_name: rest.join(" "),
         identification: { type: "CPF", number: payment.payerDocument },
       };
       try {
@@ -86,7 +103,7 @@ export function createPixGateway(env: Env, transport: typeof fetch = fetch): Pix
           const amount = (payment.priceCents / 100).toFixed(2);
           const created = z.object({ id: z.string().regex(orderIdPattern) }).parse(await request("/v1/orders", {
             method: "POST",
-            headers: { "X-Idempotency-Key": payment.id },
+            headers,
             body: JSON.stringify({
               type: "online", processing_mode: "automatic", total_amount: amount,
               external_reference: payment.id,
@@ -102,7 +119,7 @@ export function createPixGateway(env: Env, transport: typeof fetch = fetch): Pix
         // Only attempts persisted before migration 0004 may use Payments POST.
         return paymentSchema.parse(await request("/v1/payments", {
           method: "POST",
-          headers: { "X-Idempotency-Key": payment.id },
+          headers,
           body: JSON.stringify({
             transaction_amount: payment.priceCents / 100,
             description: `ExtraOK ${payment.plan === "pro" ? "Pro" : "Negócio"} - 30 dias`,

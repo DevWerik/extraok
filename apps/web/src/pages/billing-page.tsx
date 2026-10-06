@@ -11,26 +11,48 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useBilling, useBillingPayment, useCreatePayment } from '@/features/billing/billing.queries'
+import { useSession } from '@/features/auth/auth.queries'
 import type { BillingSummary, PaidPlanId, Plan } from '@/features/billing/billing.types'
-import { currentPayment, paymentLabels, pixCountdown, recoverPaymentAttempt, visiblePaymentStatus } from '@/features/billing/billing.utils'
+import { currentPayment, paymentLabels, paymentRejectionMessage, paymentRetryBlocked, pixCountdown, recoverPaymentAttempt, visiblePaymentStatus } from '@/features/billing/billing.utils'
 import { PlanCards } from '@/features/billing/plan-cards'
 import { OwnerAccessPanel } from '@/features/billing/owner-access-panel'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { formatCurrency, formatDateTime } from '@/lib/formatters'
 import { queryKeys } from '@/lib/query-keys'
 import { isServiceError } from '@/services/errors'
+import { isFullName, normalizeFullName } from '@/lib/person-name'
+import { prepareMercadoPagoDeviceId } from '@/lib/mercadopago-device'
 
 export function BillingPage() {
   const billing = useBilling()
+  const session = useSession()
   const purchase = useCreatePayment()
   const [selection, setSelection] = useState<{ plan: Plan; key: string } | null>(null)
   const [cpf, setCpf] = useState('')
+  const [payerName, setPayerName] = useState('')
+  const [preparing, setPreparing] = useState(false)
+  const [preparationError, setPreparationError] = useState('')
+  const [now, setNow] = useState(() => Date.now())
   const [selectedPaymentId, setSelectedPaymentId] = useState<string | null>(null)
   const pendingPayment = billing.data?.payments.find((payment) => payment.status === 'pending' || payment.status === 'creating')
   const recoveredPayment = selection && purchase.isError
     ? recoverPaymentAttempt(billing.data?.payments ?? [], selection.key, selection.plan.id)
     : undefined
   const paymentId = recoveredPayment?.id ?? selectedPaymentId ?? pendingPayment?.id ?? null
+  const retryBlocked = paymentRetryBlocked(billing.data?.retryAvailableAt, now)
+  const busy = preparing || purchase.isPending
+  const canPreparePayment = Boolean(billing.data?.pixAvailable && !billing.data.current.billingExempt)
+
+  useEffect(() => {
+    if (!canPreparePayment) return
+    void prepareMercadoPagoDeviceId().catch(() => { /* Submission retries preparation. */ })
+  }, [canPreparePayment])
+
+  useEffect(() => {
+    if (!retryBlocked) return
+    const timer = setInterval(() => setNow(Date.now()), 1_000)
+    return () => clearInterval(timer)
+  }, [retryBlocked])
 
   function closePayment() {
     setSelectedPaymentId(null)
@@ -42,21 +64,37 @@ export function BillingPage() {
   }
 
   function choosePlan(plan: Plan) {
-    if (billing.data?.current.billingExempt) return
+    if (billing.data?.current.billingExempt || retryBlocked) return
     purchase.reset()
     setCpf('')
+    setPayerName(session.data?.user.name ?? '')
+    setPreparationError('')
     setSelection({ plan, key: crypto.randomUUID() })
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!selection || selection.plan.id === 'free' || purchase.isPending || billing.data?.current.billingExempt) return
+    if (!selection || selection.plan.id === 'free' || busy || billing.data?.current.billingExempt || retryBlocked) return
+    setPreparationError('')
+    if (!isFullName(payerName)) {
+      setPreparationError('Informe o nome completo do pagador, com nome e sobrenome.')
+      return
+    }
+    setPreparing(true)
+    let deviceId: string
+    try { deviceId = await prepareMercadoPagoDeviceId() }
+    catch {
+      setPreparing(false)
+      setPreparationError('Não foi possível preparar o pagamento. Atualize a página e tente novamente.')
+      return
+    }
     try {
-      const payment = await purchase.mutateAsync({ planId: selection.plan.id as PaidPlanId, cpf, idempotencyKey: selection.key })
+      const payment = await purchase.mutateAsync({ planId: selection.plan.id as PaidPlanId, cpf, idempotencyKey: selection.key, payerName: normalizeFullName(payerName), deviceId })
       setSelectedPaymentId(payment.id)
       setSelection(null)
       setCpf('')
     } catch { /* The form displays the API message and preserves the retry key. */ }
+    finally { setPreparing(false) }
   }
 
   if (billing.isPending) return <div role="status" aria-label="Carregando seu plano" className="space-y-6"><Skeleton className="h-40 rounded-xl" /><div className="grid gap-5 md:grid-cols-3">{[1, 2, 3].map((id) => <Skeleton key={id} className="h-96 rounded-xl" />)}</div></div>
@@ -88,22 +126,26 @@ export function BillingPage() {
         <div><h3 className="text-xl font-bold text-primary">Escolha seu plano</h3><p className="mt-1 text-sm text-muted-foreground">{scheduled ? `Seu próximo período começa em ${nextPurchaseDate}.` : 'Os 30 dias começam quando o pagamento for confirmado.'}</p></div>
         {!data.pixAvailable && <p className="rounded-xl border border-warning/30 bg-warning-soft p-4 text-sm" role="status">O pagamento por Pix está temporariamente indisponível. Você pode continuar usando seu plano atual.</p>}
         {pendingPayment && <p className="text-sm text-muted-foreground" role="status">Você já tem um Pix em aberto. Conclua esse pagamento ou aguarde a validade antes de comprar outro plano.</p>}
+        {retryBlocked && <p className="rounded-xl border border-warning/30 bg-warning-soft p-4 text-sm" role="status">Uma cobrança foi recusada recentemente. Confira os dados do pagador e aguarde {pixCountdown(data.retryAvailableAt!, now)} antes de gerar outro Pix.</p>}
         <PlanCards plans={data.plans} action={(plan) => plan.id === 'free'
           ? <Button className="w-full" variant="outline" disabled>{data.current.planId === 'free' ? 'Seu plano atual' : 'Disponível após o período pago'}</Button>
-          : <Button className="w-full" variant={plan.id === 'pro' ? 'default' : 'outline'} disabled={!data.pixAvailable || Boolean(pendingPayment)} onClick={() => choosePlan(plan)}><QrCode className="size-4" aria-hidden="true" />{scheduled ? `Renovar com ${plan.name}` : `Ativar ${plan.name}`}</Button>} />
+          : <Button className="w-full" variant={plan.id === 'pro' ? 'default' : 'outline'} disabled={!data.pixAvailable || Boolean(pendingPayment) || retryBlocked} onClick={() => choosePlan(plan)}><QrCode className="size-4" aria-hidden="true" />{scheduled ? `Renovar com ${plan.name}` : `Ativar ${plan.name}`}</Button>} />
         <p className="text-sm leading-relaxed text-muted-foreground">O limite é consumido apenas no primeiro link de cada atendimento. Reenvios, substituições do link e extras do mesmo atendimento não consomem outra unidade. O saldo não acumula entre períodos. No Gratuito, o mês segue o horário de Brasília.</p>
       </div>
 
       <div className="space-y-3"><h3 className="text-xl font-bold text-primary">Últimas cobranças</h3>{data.payments.length === 0 ? <p className="text-sm text-muted-foreground">Você ainda não gerou cobranças de plano.</p> : <ul className="divide-y rounded-xl border bg-card">{data.payments.map((payment) => <li key={payment.id} className="flex flex-wrap items-center justify-between gap-3 p-4"><div><p className="font-semibold text-primary">{data.plans.find((plan) => plan.id === payment.planId)?.name} · {formatCurrency(payment.priceCents)}</p><p className="mt-1 text-xs text-muted-foreground">{formatDateTime(payment.createdAt)} · {paymentLabels[payment.status]}</p></div><Button size="sm" variant="outline" onClick={() => setSelectedPaymentId(payment.id)}>Ver cobrança</Button></li>)}</ul>}</div>
 
-      <Dialog open={Boolean(selection) && !recoveredPayment} onOpenChange={(open) => { if (!open && !purchase.isPending) { setSelection(null); setCpf(''); purchase.reset() } }}>
+      <Dialog open={Boolean(selection) && !recoveredPayment} onOpenChange={(open) => { if (!open && !busy) { setSelection(null); setCpf(''); setPayerName(''); setPreparationError(''); purchase.reset() } }}>
         <DialogContent>
           <DialogHeader><DialogTitle>Pagar {selection?.plan.name} com Pix</DialogTitle><DialogDescription>{selection && formatCurrency(selection.plan.priceCents)} por 30 dias, com até {selection?.plan.jobLimit} atendimentos com link. Sem renovação automática.</DialogDescription></DialogHeader>
           <p className="rounded-lg bg-muted p-3 text-sm">{scheduled ? `O período será adicionado após os já pagos, a partir de ${nextPurchaseDate}. O novo limite e os benefícios começam nessa data.` : 'Seu plano será liberado depois da confirmação do pagamento.'}</p>
           <form onSubmit={(event) => void submit(event)} className="space-y-4">
-            <div className="space-y-2"><Label htmlFor="billing-cpf">CPF do pagador</Label><Input id="billing-cpf" name="cpf" inputMode="numeric" autoComplete="off" maxLength={14} value={cpf} onChange={(event) => setCpf(event.target.value.replace(/[^\d.-]/g, '').slice(0, 14))} required disabled={purchase.isPending} aria-describedby="billing-cpf-help billing-form-error" /><p id="billing-cpf-help" className="text-xs text-muted-foreground">Usaremos o nome e o e-mail do seu cadastro. Informe o CPF da mesma pessoa.</p></div>
-            <div id="billing-form-error" role="alert">{purchase.isError && <p className="text-sm text-destructive">{isServiceError(purchase.error) ? purchase.error.message : 'Não foi possível gerar o Pix. Tente novamente.'}</p>}</div>
-            <Button type="submit" className="w-full" disabled={purchase.isPending || cpf.replace(/\D/g, '').length !== 11}><QrCode className="size-4" aria-hidden="true" />{purchase.isPending ? 'Gerando Pix...' : `Gerar Pix de ${selection ? formatCurrency(selection.plan.priceCents) : ''}`}</Button>
+            <div className="space-y-2"><Label htmlFor="billing-name">Nome completo do pagador</Label><Input id="billing-name" name="payerName" autoComplete="name" maxLength={100} value={payerName} onChange={(event) => setPayerName(event.target.value)} required disabled={busy} aria-describedby="billing-payer-help billing-form-error" /></div>
+            <div className="space-y-2"><Label htmlFor="billing-email">E-mail do cadastro</Label><Input id="billing-email" type="email" value={session.data?.user.email ?? ''} readOnly aria-describedby="billing-payer-help" /></div>
+            <div className="space-y-2"><Label htmlFor="billing-cpf">CPF do pagador</Label><Input id="billing-cpf" name="cpf" inputMode="numeric" autoComplete="off" maxLength={14} value={cpf} onChange={(event) => setCpf(event.target.value.replace(/[^\d.-]/g, '').slice(0, 14))} required disabled={busy} aria-describedby="billing-payer-help billing-form-error" /></div>
+            <p id="billing-payer-help" className="text-xs text-muted-foreground">Confira o nome completo como consta no documento. O nome, o CPF e o e-mail devem identificar o pagador. A correção do nome vale para esta cobrança.</p>
+            <div id="billing-form-error" role="alert">{preparationError ? <p className="text-sm text-destructive">{preparationError}</p> : purchase.isError && <p className="text-sm text-destructive">{isServiceError(purchase.error) ? purchase.error.message : 'Não foi possível gerar o Pix. Tente novamente.'}</p>}</div>
+            <Button type="submit" className="w-full" disabled={busy || retryBlocked || !isFullName(payerName) || !session.data?.user.email || cpf.replace(/\D/g, '').length !== 11}><QrCode className="size-4" aria-hidden="true" />{busy ? 'Gerando Pix...' : `Gerar Pix de ${selection ? formatCurrency(selection.plan.priceCents) : ''}`}</Button>
           </form>
         </DialogContent>
       </Dialog>
@@ -139,7 +181,7 @@ function PixPaymentPanel({ id, summary, onClose }: { id: string; summary: Billin
   return <Card className="border-success/30" aria-label="Cobrança Pix">
     <CardHeader><h3 className="text-xl font-bold text-primary">{status ? paymentLabels[status] : 'Consultando cobrança...'}</h3>{payment && <p className="text-sm text-muted-foreground">{summary.plans.find((plan) => plan.id === payment.planId)?.name} · {formatCurrency(payment.priceCents)}</p>}</CardHeader>
     <CardContent className="space-y-4">
-      <div role="status" aria-live="polite">{status === 'approved' ? <p className="flex items-start gap-2 font-semibold text-success"><CheckCircle2 className="size-5 shrink-0" aria-hidden="true" />Pagamento confirmado. Consulte acima a validade do período liberado.</p> : status === 'creating' ? <p>Estamos preparando sua cobrança. Ela aparecerá aqui automaticamente.</p> : status === 'pending' ? <p className="text-sm">Escaneie o QR Code no aplicativo do seu banco ou use o Pix Copia e Cola. A confirmação aparecerá automaticamente.</p> : status === 'expired' ? <p className="text-sm">A validade deste Pix terminou. Se você já pagou, atualize a cobrança antes de gerar outro Pix.</p> : status === 'rejected' ? <p className="text-sm">O Mercado Pago não aprovou esta cobrança. Nenhum plano foi liberado. Confira os dados do titular do cadastro e evite tentativas seguidas. Se a recusa persistir, entre em contato com o suporte.</p> : status === 'refunded' ? <p className="text-sm">O período desta cobrança foi desativado após o reembolso. Seu histórico de atendimentos foi preservado.</p> : status ? <p className="text-sm">Esta cobrança não liberou um plano. Você pode escolher uma nova opção acima.</p> : null}</div>
+      <div role="status" aria-live="polite">{status === 'approved' ? <p className="flex items-start gap-2 font-semibold text-success"><CheckCircle2 className="size-5 shrink-0" aria-hidden="true" />Pagamento confirmado. Consulte acima a validade do período liberado.</p> : status === 'creating' ? <p>Estamos preparando sua cobrança. Ela aparecerá aqui automaticamente.</p> : status === 'pending' ? <p className="text-sm">Escaneie o QR Code no aplicativo do seu banco ou use o Pix Copia e Cola. A confirmação aparecerá automaticamente.</p> : status === 'expired' ? <p className="text-sm">A validade deste Pix terminou. Se você já pagou, atualize a cobrança antes de gerar outro Pix.</p> : status === 'rejected' ? <p className="text-sm">{paymentRejectionMessage(payment?.rejectionReason ?? null)} Nenhum plano foi liberado.</p> : status === 'refunded' ? <p className="text-sm">O período desta cobrança foi desativado após o reembolso. Seu histórico de atendimentos foi preservado.</p> : status ? <p className="text-sm">Esta cobrança não liberou um plano. Você pode escolher uma nova opção acima.</p> : null}</div>
       {payment && status === 'pending' && payment.qrCode && <div className="grid items-center gap-5 sm:grid-cols-[12rem_1fr]">
         {payment.qrCodeBase64 && <img src={`data:image/png;base64,${payment.qrCodeBase64}`} alt={`QR Code para pagar ${formatCurrency(payment.priceCents)} via Pix`} width={192} height={192} className="mx-auto rounded-lg border bg-white p-2" />}
         <div className="min-w-0 space-y-3"><p className="text-sm font-semibold">Validade: <span className="tabular-nums">{pixCountdown(payment.expiresAt, now)}</span></p><Label htmlFor={`pix-code-${id}`}>Pix Copia e Cola</Label><textarea id={`pix-code-${id}`} readOnly value={payment.qrCode} className="min-h-24 w-full resize-none rounded-lg border bg-muted p-3 text-xs break-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onFocus={(event) => event.target.select()} /><Button onClick={() => void copyPix()} className="w-full sm:w-auto"><Copy className="size-4" aria-hidden="true" />{copied ? 'Pix copiado' : 'Copiar código Pix'}</Button></div>

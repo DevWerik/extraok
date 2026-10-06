@@ -229,6 +229,37 @@ test("duas abas reutilizam Pix; confirmação repetida libera um período e prot
   for (const privateField of ["payerDocument", "payerEmail", "providerId", "52998224725"]) assert.equal(summary.body.includes(privateField), false);
 });
 
+test("recusa cria pausa por conta, preserva replay e não estende a pausa em webhooks repetidos", databaseOptions, async (context) => {
+  const f = await fixture(context);
+  const created = await f.purchase();
+  const remote = [...f.remotes.values()].find((entry) => entry.external_reference === created.id)!;
+  remote.status = "rejected";
+  remote.status_detail = "high_risk";
+  remote.date_last_updated = new Date(Date.now() + 1_000).toISOString();
+  assert.equal((await f.webhook(remote)).statusCode, 200);
+  const saved = await f.prisma.billingPayment.findUniqueOrThrow({ where: { id: created.id } });
+  assert.ok(saved.rejectedAt);
+  assert.equal(saved.rejectionReason, "high_risk");
+  assert.equal(saved.payerDeviceId, null);
+  assert.equal((await f.webhook(remote)).statusCode, 200);
+  assert.deepEqual((await f.prisma.billingPayment.findUniqueOrThrow({ where: { id: created.id } })).rejectedAt, saved.rejectedAt);
+  const replay = await f.purchase("pro", created.id);
+  assert.equal(replay.status, "rejected");
+  const summary = await f.app.inject({ url: "/api/v1/billing", headers: f.headers });
+  assert.ok(summary.json().retryAvailableAt);
+  const blocked = await Promise.all(["pro", "business"].map((planId) => f.app.inject({ method: "POST", url: "/api/v1/billing/payments", headers: f.headers,
+    payload: { planId, cpf: "52998224725", idempotencyKey: randomUUID() } })));
+  for (const result of blocked) {
+    assert.equal(result.statusCode, 429, result.body);
+    assert.equal(result.json().error.code, "PAYMENT_RETRY_LATER");
+    assert.ok(Number(result.headers["retry-after"]) > 0);
+  }
+  assert.equal(f.createdKeys.size, 1);
+  assert.equal(await f.prisma.billingPeriod.count({ where: { ownerId: f.user.id } }), 0);
+  await f.prisma.billingPayment.update({ where: { id: created.id }, data: { rejectedAt: new Date(Date.now() - 11 * 60_000) } });
+  assert.notEqual((await f.purchase()).id, created.id);
+});
+
 test("renovação agenda próximo período; reembolso revoga somente a compra correspondente", databaseOptions, async (context) => {
   const f = await fixture(context);
   const first = await f.purchase();

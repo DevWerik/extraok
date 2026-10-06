@@ -1,14 +1,39 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { currentPayment, pixCountdown, recoverPaymentAttempt, visiblePaymentStatus } from '../src/features/billing/billing.utils.ts'
+import { currentPayment, paymentRejectionMessage, paymentRetryBlocked, pixCountdown, recoverPaymentAttempt, visiblePaymentStatus } from '../src/features/billing/billing.utils.ts'
+import { isFullName, normalizeFullName } from '../src/lib/person-name.ts'
+import { readMercadoPagoDeviceId } from '../src/lib/mercadopago-device.ts'
 import type { BillingPayment } from '../src/features/billing/billing.types.ts'
 import worker from '../worker/index.ts'
 
 const payment: BillingPayment = {
   id: '11111111-1111-4111-8111-111111111111', planId: 'business', priceCents: 1999,
   status: 'creating', createdAt: '2026-10-06T12:00:00Z', expiresAt: '2026-10-06T12:30:00Z',
-  approvedAt: null, qrCode: null, qrCodeBase64: null,
+  approvedAt: null, qrCode: null, qrCodeBase64: null, rejectionReason: null, retryAvailableAt: null,
 }
+
+test('dados do pagador aceitam nomes compostos reais e rejeitam nome isolado e documentos no nome', () => {
+  for (const name of ['João da Silva', "Ana-Maria D’Ávila", "José D'Ávila", 'Érica Souza']) assert.equal(isFullName(name), true)
+  for (const name of ['', 'João', '  João  ', '52998224725', 'Pessoa 123', 'A'.repeat(101) + ' Silva']) assert.equal(isFullName(name), false)
+  assert.equal(normalizeFullName('  João   da\tSilva  '), 'João da Silva')
+})
+
+test('Device ID aceita o identificador do script e rejeita ausência, tamanho excessivo e quebra de header', () => {
+  assert.equal(readMercadoPagoDeviceId('device-session-123_test'), 'device-session-123_test')
+  for (const value of [null, undefined, '', 123, {}, 'x'.repeat(257), 'device\r\nAuthorization: forged']) assert.equal(readMercadoPagoDeviceId(value), undefined)
+})
+
+test('pausa acaba no horário exato e recusa por risco tem orientação específica', () => {
+  const retryAt = '2026-10-06T12:10:00Z'
+  assert.equal(paymentRetryBlocked(retryAt, Date.parse(retryAt) - 1), true)
+  assert.equal(paymentRetryBlocked(retryAt, Date.parse(retryAt)), false)
+  assert.equal(paymentRetryBlocked(null, Date.parse(retryAt)), false)
+  assert.equal(paymentRetryBlocked(undefined, Date.parse(retryAt)), false)
+  assert.equal(paymentRetryBlocked('invalid', Date.parse(retryAt)), false)
+  assert.match(paymentRejectionMessage('high_risk'), /análise de risco/)
+  assert.doesNotMatch(paymentRejectionMessage(null), /análise de risco/)
+  assert.doesNotMatch(paymentRejectionMessage('high_risk'), /instantes|indisponível/)
+})
 
 test('503 na criação é substituído pela recusa reconciliada da mesma tentativa', () => {
   assert.equal(recoverPaymentAttempt([payment], payment.id, 'business'), undefined)

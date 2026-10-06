@@ -27,3 +27,13 @@ export function pixCountdown(expiresAt: string, now: number) {
   const seconds = Math.max(0, Math.ceil((Date.parse(expiresAt) - now) / 1000))
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
 }
+
+export function paymentRetryBlocked(retryAvailableAt: string | null | undefined, now: number) {
+  return Boolean(retryAvailableAt && Date.parse(retryAvailableAt) > now)
+}
+
+export function paymentRejectionMessage(reason: BillingPayment['rejectionReason']) {
+  return reason === 'high_risk'
+    ? 'O Mercado Pago recusou esta cobrança por análise de risco. Confira o nome completo, e-mail e CPF do pagador antes de uma nova tentativa. Se a recusa persistir, entre em contato com o suporte.'
+    : 'O Mercado Pago não aprovou esta cobrança. Confira os dados do pagador antes de uma nova tentativa. Se a recusa persistir, entre em contato com o suporte.'
+}

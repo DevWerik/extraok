@@ -34,6 +34,8 @@ const serviceErrorCodes = new Set<ServiceErrorCode>([
   'BILLING_EXEMPT',
   'PAYMENT_UNAVAILABLE',
   'PAYMENT_MISMATCH',
+  'PAYER_DATA_REQUIRED',
+  'PAYMENT_RETRY_LATER',
 ])
 
 function fallbackCode(status: number): ServiceErrorCode {

@@ -2,16 +2,21 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { notFound, unauthorized } from "../../lib/errors.js";
 import { parseWith } from "../../lib/validation.js";
+import { fullNameSchema } from "../../lib/person-name.js";
 import { currentUser, requireAuth } from "../../plugins/auth.js";
 import { BILLING_PLANS, validCpf } from "./plans.js";
 import { validWebhookSignature, type PixGateway } from "./mercadopago.js";
 import { providerResourceIdPattern } from "./orders.js";
+import { deviceIdPattern, PaymentRetryLaterError } from "./payment-risk.js";
 import { applyVerifiedPayment, billingSummary, createPayment, reconcilePayments, requireBilling, requirePaymentPurchase, serializePayment, synchronizePayment } from "./service.js";
 
 const purchaseSchema = z.object({
   planId: z.enum(["pro", "business"]),
   cpf: z.string().max(18).transform((value) => value.replace(/[.\-\s]/g, "")).refine(validCpf, "Informe um CPF válido para gerar o Pix."),
   idempotencyKey: z.string().uuid(),
+  // Optional for older clients/attempts; new checkout sends reviewed payer data.
+  payerName: fullNameSchema.optional(),
+  deviceId: z.string().regex(deviceIdPattern).optional(),
 }).strict();
 const idSchema = z.object({ id: z.string().uuid() });
 const notificationSchema = z.object({ "data.id": z.string().regex(providerResourceIdPattern) });
@@ -29,7 +34,12 @@ export async function registerBillingRoutes(app: FastifyInstance, gateway: PixGa
     reply.header("Cache-Control", "no-store");
     requirePaymentPurchase(app, currentUser(request).id);
     const input = parseWith(purchaseSchema, request.body);
-    return reply.status(201).send(await createPayment(app, gateway, currentUser(request), input));
+    try {
+      return reply.status(201).send(await createPayment(app, gateway, currentUser(request), input));
+    } catch (error) {
+      if (error instanceof PaymentRetryLaterError) reply.header("Retry-After", error.retryAfterSeconds);
+      throw error;
+    }
   });
   app.get("/billing/payments/:id", { preHandler: requireAuth, config: { rateLimit: { max: 30, timeWindow: "1 minute" } } }, async (request, reply) => {
     reply.header("Cache-Control", "no-store");

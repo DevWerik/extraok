@@ -6,6 +6,9 @@ import { isBillingOwner, lockBilling, readEntitlement } from "./entitlements.js"
 import { BILLING_PLANS, paidPlan, PAID_PERIOD_MS, PIX_EXPIRATION_MS, type PaidPlan } from "./plans.js";
 import { PixGatewayError, type PixGateway, type PixPayment } from "./mercadopago.js";
 import { orderIdPattern } from "./orders.js";
+import { fullNameSchema } from "../../lib/person-name.js";
+import { parseWith } from "../../lib/validation.js";
+import { isHighRisk, PAYMENT_RETRY_DELAY_MS, paymentRetryAvailableAt, PaymentRetryLaterError } from "./payment-risk.js";
 
 export function requireBilling(app: FastifyInstance) {
   if (!app.env.BILLING_ENABLED) {
@@ -29,6 +32,8 @@ export function serializePayment(payment: BillingPayment) {
     createdAt: payment.createdAt, approvedAt: payment.approvedAt, expiresAt: payment.expiresAt,
     qrCode: pending && !expired ? payment.qrCode : null,
     qrCodeBase64: pending && !expired ? payment.qrCodeBase64 : null,
+    rejectionReason: payment.status === "rejected" && payment.rejectionReason === "high_risk" ? "high_risk" as const : null,
+    retryAvailableAt: payment.status === "rejected" ? paymentRetryAvailableAt(payment.rejectedAt) : null,
   };
 }
 
@@ -43,12 +48,17 @@ export async function billingSummary(app: FastifyInstance, ownerId: string) {
       orderBy: { startsAt: "asc" },
     });
     const payments = await transaction.billingPayment.findMany({ where: { ownerId }, orderBy: { createdAt: "desc" }, take: 20 });
+    const recentRejection = await transaction.billingPayment.findFirst({
+      where: { ownerId, status: "rejected", rejectedAt: { gt: new Date(now.getTime() - PAYMENT_RETRY_DELAY_MS) } },
+      orderBy: { rejectedAt: "desc" },
+    });
     return {
       plans: BILLING_PLANS, pixAvailable: app.env.BILLING_ENABLED,
       current: { billingExempt: current.billingExempt, planId: current.planId, features: current.features, startsAt: current.startsAt, endsAt: current.endsAt, limit: current.limit, used: current.used, remaining: current.remaining },
       upcoming,
       nextPurchaseStartsAt: current.billingExempt ? null : upcoming.at(-1)?.endsAt ?? (current.planId === "free" ? now : current.endsAt),
       payments: payments.map(serializePayment),
+      retryAvailableAt: paymentRetryAvailableAt(recentRejection?.rejectedAt),
     };
   });
 }
@@ -99,7 +109,9 @@ export async function applyVerifiedPayment(app: FastifyInstance, remote: PixPaym
       where: { id: current.id },
       data: {
         providerId: remote.id, status, providerUpdatedAt, lastCheckedAt: now,
-        payerDocument: null,
+        payerDocument: null, payerDeviceId: null,
+        rejectionReason: status === "rejected" ? (isHighRisk(remote.status_detail) ? "high_risk" : current.rejectionReason) : null,
+        rejectedAt: status === "rejected" ? current.rejectedAt ?? now : current.rejectedAt,
         approvedAt: current.approvedAt ?? (remote.date_approved ? new Date(remote.date_approved) : null),
         qrCode: status === "pending" ? pix?.qr_code ?? current.qrCode : null,
         qrCodeBase64: status === "pending" ? pix?.qr_code_base64 ?? current.qrCodeBase64 : null,
@@ -134,7 +146,7 @@ export async function synchronizePayment(app: FastifyInstance, gateway: PixGatew
     // No QR was shown. A later verified webhook can still recover a paid charge.
     return app.prisma.billingPayment.updateMany({
       where: { id: payment.id, providerId: null, status: "creating" },
-      data: { status: "expired", payerDocument: null },
+      data: { status: "expired", payerDocument: null, payerDeviceId: null },
     }).then(() => app.prisma.billingPayment.findUniqueOrThrow({ where: { id: payment.id } }));
   }
   const remote = payment.providerId ? await gateway.get(payment.providerId) : await gateway.create(payment);
@@ -142,7 +154,7 @@ export async function synchronizePayment(app: FastifyInstance, gateway: PixGatew
 }
 
 export async function createPayment(app: FastifyInstance, gateway: PixGateway, user: AuthUser,
-  input: { planId: PaidPlan; cpf: string; idempotencyKey: string }) {
+  input: { planId: PaidPlan; cpf: string; idempotencyKey: string; payerName?: string; deviceId?: string }) {
   requirePaymentPurchase(app, user.id);
   const plan = paidPlan(input.planId);
   const payment = await app.prisma.$transaction(async (transaction) => {
@@ -156,17 +168,24 @@ export async function createPayment(app: FastifyInstance, gateway: PixGateway, u
     const now = new Date();
     await transaction.billingPayment.updateMany({
       where: { ownerId: user.id, status: { in: ["creating", "pending"] }, expiresAt: { lte: now } },
-      data: { status: "expired", payerDocument: null, qrCode: null, qrCodeBase64: null },
+      data: { status: "expired", payerDocument: null, payerDeviceId: null, qrCode: null, qrCodeBase64: null },
     });
     const pending = await transaction.billingPayment.findFirst({ where: { ownerId: user.id, status: { in: ["creating", "pending"] } } });
     if (pending) {
       if (pending.plan !== input.planId) throw conflict("Você já possui um Pix pendente. Conclua o pagamento ou aguarde a validade para escolher outro plano.");
       return pending;
     }
+    const recentRejection = await transaction.billingPayment.findFirst({
+      where: { ownerId: user.id, status: "rejected", rejectedAt: { gt: new Date(now.getTime() - PAYMENT_RETRY_DELAY_MS) } },
+      orderBy: { rejectedAt: "desc" },
+    });
+    const retryAvailableAt = paymentRetryAvailableAt(recentRejection?.rejectedAt);
+    if (retryAvailableAt && retryAvailableAt > now) throw new PaymentRetryLaterError(retryAvailableAt, now);
+    const payerName = parseWith(fullNameSchema, input.payerName ?? user.name);
     return transaction.billingPayment.create({
       data: {
         id: input.idempotencyKey, ownerId: user.id, providerApi: "orders", plan: input.planId, priceCents: plan.priceCents, jobLimit: plan.jobLimit,
-        payerEmail: user.email, payerName: user.name, payerDocument: input.cpf,
+        payerEmail: user.email, payerName, payerDocument: input.cpf, payerDeviceId: input.deviceId ?? null,
         expiresAt: new Date(now.getTime() + PIX_EXPIRATION_MS),
       },
     });

@@ -241,6 +241,9 @@ model BillingPayment {
   payerEmail        String               @map("payer_email") @db.VarChar(320)
   payerName         String               @map("payer_name") @db.VarChar(120)
   payerDocument     String?              @map("payer_document") @db.VarChar(11)
+  payerDeviceId     String?              @map("payer_device_id") @db.VarChar(256)
+  rejectionReason   String?              @map("rejection_reason") @db.VarChar(32)
+  rejectedAt        DateTime?            @map("rejected_at") @db.Timestamptz(3)
   qrCode            String?              @map("qr_code") @db.Text
   qrCodeBase64       String?              @map("qr_code_base64") @db.Text
   expiresAt         DateTime             @map("expires_at") @db.Timestamptz(3)

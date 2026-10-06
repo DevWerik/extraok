@@ -5,6 +5,7 @@ import { conflict, unauthorized } from "../../lib/errors.js";
 import { hashPassword, verifyPassword } from "../../lib/password.js";
 import { createOpaqueToken, hashToken } from "../../lib/tokens.js";
 import { parseWith } from "../../lib/validation.js";
+import { fullNameSchema } from "../../lib/person-name.js";
 import {
   clearSessionCookie,
   currentUser,
@@ -21,7 +22,7 @@ const emailSchema = z
   .pipe(z.email("Informe um e-mail válido."));
 
 const registerSchema = z.object({
-  name: z.string().trim().min(3).max(100),
+  name: fullNameSchema,
   businessName: z.string().trim().min(2).max(120),
   email: emailSchema,
   phone: z.string().trim().min(10).max(30),
