@@ -7,7 +7,7 @@ import { createPrismaClient } from "../src/db/prisma.js";
 import type { BillingPayment } from "../src/generated/prisma/client.js";
 import { hashToken } from "../src/lib/tokens.js";
 import { createPixGateway, validWebhookSignature } from "../src/modules/billing/mercadopago.js";
-import { normalizeOrder } from "../src/modules/billing/orders.js";
+import { normalizeOrder, normalizeOrderAccount } from "../src/modules/billing/orders.js";
 import { applyVerifiedPayment, reconcilePayments, synchronizePayment } from "../src/modules/billing/service.js";
 
 const orderId = "ORD01HRYFWNYRE1MR1E60MW3X0T2P";
@@ -226,6 +226,62 @@ test("Orders diferencia sandbox do Pix real e aguarda transações assíncronas"
   assert.equal(normalized.payment_method_id, null);
 });
 
+test("Orders sem live_mode e ticket usa a conta autenticada para produção e teste", async () => {
+  for (const tags of [[], ["test_user"]]) {
+    const remote = accredited();
+    remote.transactions.payments[0].payment_method.ticket_url = "";
+    const paths: string[] = [];
+    // Deliberately disagree with the configuration: it must not prove mode.
+    const gateway = createPixGateway({ ...env, MERCADOPAGO_LIVE_MODE: tags.length > 0 }, (async (url, options) => {
+      paths.push(String(url));
+      assert.equal(options?.method, "GET");
+      assert.equal(new Headers(options?.headers).get("Authorization"), `Bearer ${env.MERCADOPAGO_ACCESS_TOKEN}`);
+      assert.equal(options?.redirect, "error");
+      if (String(url).endsWith("/users/me")) return Response.json({ id: 123456, tags, site_id: "MLB" });
+      return Response.json(remote);
+    }) as typeof fetch);
+    const result = await gateway.get(orderId);
+    assert.equal(result.live_mode, tags.length === 0);
+    assert.equal(result.status, "approved");
+    assert.equal(result.collector_id, "123456");
+    assert.deepEqual(paths, [`https://api.mercadopago.com/v1/orders/${orderId}`, "https://api.mercadopago.com/users/me"]);
+  }
+});
+
+test("Orders exige conta completa e mesmo recebedor; falha de consulta não vira produção", async () => {
+  const remote = accredited();
+  remote.transactions.payments[0].payment_method.ticket_url = "";
+  for (const account of [
+    { id: "99999", tags: [], site_id: "MLB" },
+    { id: "123456", site_id: "MLB" },
+    { id: "123456", tags: [], site_id: "MLA" },
+    { id: "123456", tags: "test_user", site_id: "MLB" },
+  ]) {
+    const gateway = createPixGateway(env, (async (url) => Response.json(String(url).endsWith("/users/me") ? account : remote)) as typeof fetch);
+    await assert.rejects(gateway.get(orderId), (error: { code?: string }) => error.code === "PAYMENT_UNAVAILABLE");
+  }
+  let requests = 0;
+  const retry = createPixGateway(env, (async (url) => {
+    if (!String(url).endsWith("/users/me")) return Response.json(remote);
+    requests++;
+    return requests === 1 ? Response.json({ secret: "not-for-client" }, { status: 503 })
+      : Response.json({ id: "123456", tags: [], site_id: "MLB" });
+  }) as typeof fetch);
+  await assert.rejects(retry.get(orderId));
+  assert.equal((await retry.get(orderId)).live_mode, true);
+  assert.equal(requests, 2);
+
+  const productionAccount = normalizeOrderAccount({ id: "123456", tags: [], site_id: "MLB" });
+  const sandboxAccount = normalizeOrderAccount({ id: "123456", tags: ["test_user"], site_id: "MLB" });
+  assert.throws(() => normalizeOrder({ ...remote, id: sandboxOrderId }, productionAccount));
+  assert.throws(() => normalizeOrder({ ...remote, live_mode: false }, productionAccount));
+  assert.throws(() => normalizeOrder({ ...remote, live_mode: true }, sandboxAccount));
+  assert.throws(() => normalizeOrder(pixOrder(), productionAccount));
+  // Knowing the seller still does not permit incomplete payment amounts.
+  remote.total_paid_amount = "0.01";
+  assert.throws(() => normalizeOrder(remote, productionAccount));
+});
+
 test("Orders valida HMAC de IDs alfanuméricos e rejeita adulteração antes de consultar o provedor", async (context) => {
   for (const lower of [true, false]) {
     const headers = signed(orderId, lower);
@@ -261,8 +317,10 @@ test("Orders não expõe corpo do provedor nem detalhes de validação", async (
   await assert.rejects(gateway.get(orderId));
 });
 
-for (const providerOrderId of [orderId, sandboxOrderId]) {
-test(`Orders ${providerOrderId.slice(0, -26)} integra criação assíncrona, polling, HMAC, duplicatas, reembolso e modo real`, { skip: !databaseUrl && "TEST_DATABASE_URL não definida" }, async (context) => {
+for (const [providerOrderId, accountFallback] of [[orderId, false], [sandboxOrderId, false], [orderId, true]] as const) {
+test(`Orders ${providerOrderId.slice(0, -26)} ${accountFallback ? "conta real autenticada" : "sandbox"} integra criação assíncrona, polling, HMAC, duplicatas e reembolso`, { skip: !databaseUrl && "TEST_DATABASE_URL não definida" }, async (context) => {
+  const scenarioEnv = { ...env, MERCADOPAGO_LIVE_MODE: accountFallback };
+  const account = accountFallback ? normalizeOrderAccount({ id: "123456", tags: [], site_id: "MLB" }) : undefined;
   const prisma = createPrismaClient(databaseUrl!);
   const token = randomUUID();
   const user = await prisma.user.create({ data: {
@@ -272,21 +330,25 @@ test(`Orders ${providerOrderId.slice(0, -26)} integra criação assíncrona, pol
   } });
   const remote = pixOrder();
   remote.id = providerOrderId;
+  if (accountFallback) remote.transactions.payments[0].payment_method.ticket_url = "";
   const completedTransaction = structuredClone(remote.transactions.payments[0]);
   remote.status = "processing";
   remote.transactions.payments = [];
   let creates = 0;
-  const gateway = createPixGateway(env, (async (url, options) => {
+  const gateway = createPixGateway(scenarioEnv, (async (url, options) => {
     if (options?.method === "POST") {
       creates++;
       assert.equal(String(url), "https://api.mercadopago.com/v1/orders");
       remote.external_reference = JSON.parse(String(options.body)).external_reference;
       return Response.json({ id: providerOrderId });
     }
+    if (accountFallback && String(url) === "https://api.mercadopago.com/users/me") {
+      return Response.json({ id: "123456", tags: [], site_id: "MLB" });
+    }
     assert.equal(String(url), `https://api.mercadopago.com/v1/orders/${providerOrderId}`);
     return Response.json(remote);
   }) as typeof fetch);
-  const app = await buildApp({ env, prisma, pixGateway: gateway, logger: false, billingReconciliationEnabled: false });
+  const app = await buildApp({ env: scenarioEnv, prisma, pixGateway: gateway, logger: false, billingReconciliationEnabled: false });
   context.after(async () => { await app.close(); await prisma.user.delete({ where: { id: user.id } }); await prisma.$disconnect(); });
   const headers = { origin, cookie: `extraok_session=${token}` };
   const purchase = () => app.inject({ method: "POST", url: "/api/v1/billing/payments", headers, payload: { planId: "pro", cpf: "52998224725", idempotencyKey: randomUUID() } });
@@ -316,10 +378,10 @@ test(`Orders ${providerOrderId.slice(0, -26)} integra criação assíncrona, pol
     remote.transactions.payments[0].payment_method.qr_code = "";
     remote.transactions.payments[0].payment_method.qr_code_base64 = "";
   }
-  const production = await buildApp({ env: { ...env, MERCADOPAGO_LIVE_MODE: true }, prisma, pixGateway: gateway, logger: false, billingReconciliationEnabled: false });
-  await assert.rejects(applyVerifiedPayment(production, normalizeOrder(remote), id), (error: { code?: string }) => error.code === "PAYMENT_MISMATCH");
-  await production.close();
-  const wrongReceiver = { ...remote, user_id: "99999" };
+  const oppositeMode = await buildApp({ env: { ...env, MERCADOPAGO_LIVE_MODE: !accountFallback }, prisma, pixGateway: gateway, logger: false, billingReconciliationEnabled: false });
+  await assert.rejects(applyVerifiedPayment(oppositeMode, normalizeOrder(remote, account), id), (error: { code?: string }) => error.code === "PAYMENT_MISMATCH");
+  await oppositeMode.close();
+  const wrongReceiver = { ...remote, user_id: "99999", live_mode: accountFallback };
   await assert.rejects(applyVerifiedPayment(app, normalizeOrder(wrongReceiver), id), (error: { code?: string }) => error.code === "PAYMENT_MISMATCH");
   assert.equal(await prisma.billingPeriod.count({ where: { paymentId: id } }), 0);
   const callbacks = await Promise.all([notify(), notify()]);
@@ -329,7 +391,7 @@ test(`Orders ${providerOrderId.slice(0, -26)} integra criação assíncrona, pol
   remote.last_updated_date = new Date(Date.now() + 2000).toISOString();
   await notify();
   assert.deepEqual((await prisma.billingPayment.findUniqueOrThrow({ where: { id } })).approvedAt, approvedAt);
-  const stale = normalizeOrder(remote);
+  const stale = normalizeOrder(remote, account);
   remote.status_detail = "partially_refunded";
   remote.transactions.payments[0].refunded_amount = "0.01";
   remote.last_updated_date = new Date(Date.now() + 3000).toISOString();

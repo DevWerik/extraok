@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { Env } from "../../config/env.js";
 import type { BillingPayment } from "../../generated/prisma/client.js";
 import { AppError } from "../../lib/errors.js";
-import { normalizeOrder, orderIdPattern, providerResourceIdPattern } from "./orders.js";
+import { normalizeOrder, normalizeOrderAccount, OrderModeUnavailableError, orderIdPattern, providerResourceIdPattern } from "./orders.js";
 
 const providerId = z.union([z.string().regex(/^\d{1,64}$/), z.number().int().positive().max(Number.MAX_SAFE_INTEGER)]).transform(String);
 const date = z.string().refine((value) => Number.isFinite(Date.parse(value)));
@@ -62,7 +62,15 @@ export function createPixGateway(env: Env, transport: typeof fetch = fetch): Pix
     }
   }
   async function readOrder(id: string): Promise<PixPayment> {
-    const remote = normalizeOrder(await request(`/v1/orders/${id}`, { method: "GET" }));
+    const data = await request(`/v1/orders/${id}`, { method: "GET" });
+    let remote: PixPayment;
+    try {
+      remote = normalizeOrder(data);
+    } catch (error) {
+      if (!(error instanceof OrderModeUnavailableError)) throw error;
+      const account = normalizeOrderAccount(await request("/users/me", { method: "GET" }));
+      remote = normalizeOrder(data, account);
+    }
     if (remote.id !== id) throw new PixGatewayError();
     return remote;
   }

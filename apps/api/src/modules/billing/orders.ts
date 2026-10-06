@@ -12,6 +12,24 @@ const amount = z.string().regex(/^\d{1,12}(?:\.\d{1,2})?$/).transform((value) =>
   return Number(whole) * 100 + Number(fraction.padEnd(2, "0"));
 });
 const status = z.enum(["created", "processing", "action_required", "processed", "canceled", "expired", "failed", "refunded", "charged_back"]);
+const accountSchema = z.object({
+  id: z.union([z.string().regex(/^\d{1,64}$/), z.number().int().positive().max(Number.MAX_SAFE_INTEGER)]).transform(String),
+  tags: z.array(z.string()),
+  site_id: z.literal("MLB"),
+});
+export type OrderAccount = { collectorId: string; liveMode: boolean };
+
+// Only pass /users/me fetched with the same token as the order. Orders sandbox
+// uses a test seller account; the APP_USR token prefix alone cannot prove mode.
+export function normalizeOrderAccount(data: unknown): OrderAccount {
+  const account = accountSchema.parse(data);
+  return { collectorId: account.id, liveMode: !account.tags.includes("test_user") };
+}
+
+export class OrderModeUnavailableError extends Error {
+  constructor() { super("Unverifiable order mode"); }
+}
+
 const orderSchema = z.object({
   id: z.string().regex(orderIdPattern).transform((value) => value.toUpperCase()),
   type: z.literal("online"),
@@ -61,7 +79,7 @@ function ticketLiveMode(ticket: string | null | undefined): boolean | undefined 
 
 // Orders uses decimal amounts, ORD/PAY IDs and a different status vocabulary.
 // Normalize only authenticated provider responses; webhook bodies never enter here.
-export function normalizeOrder(data: unknown): PixPayment {
+export function normalizeOrder(data: unknown, account?: OrderAccount): PixPayment {
   const order = orderSchema.parse(data);
   const payment = order.transactions?.payments[0];
   const processing = !payment && ["created", "processing"].includes(order.status);
@@ -82,8 +100,14 @@ export function normalizeOrder(data: unknown): PixPayment {
   // Accredited sandbox responses can omit both live_mode and the Pix ticket.
   // Only the authenticated ORDTST resource proves sandbox in that case; an
   // ordinary ORD identifier does not prove that a payment is live.
-  const liveMode = order.live_mode ?? ticketMode ?? (sandboxOrder ? false : undefined);
-  if (liveMode === undefined && !processing) throw new Error("Unverifiable order mode");
+  const orderMode = order.live_mode ?? ticketMode ?? (sandboxOrder ? false : undefined);
+  if (account && account.collectorId !== order.user_id) throw new Error("Order account mismatch");
+  if (account && orderMode !== undefined && orderMode !== account.liveMode) throw new Error("Order account mode mismatch");
+  // Real Orders GETs can omit both live_mode and ticket_url as well. In that
+  // case use the authenticated seller, bound to order.user_id, never Env flags
+  // or webhook fields. Missing/malformed seller data still fails closed.
+  const liveMode = orderMode ?? account?.liveMode;
+  if (liveMode === undefined && !processing) throw new OrderModeUnavailableError();
 
   const statuses = [order.status, payment?.status];
   const details = [order.status_detail, payment?.status_detail];
