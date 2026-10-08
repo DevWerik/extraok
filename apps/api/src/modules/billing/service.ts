@@ -9,6 +9,7 @@ import { orderIdPattern } from "./orders.js";
 import { fullNameSchema } from "../../lib/person-name.js";
 import { parseWith } from "../../lib/validation.js";
 import { isHighRisk, PAYMENT_RETRY_DELAY_MS, paymentRetryAvailableAt, PaymentRetryLaterError } from "./payment-risk.js";
+import { STRIPE_CHECKOUT_MS } from "./stripe.js";
 
 export function requireBilling(app: FastifyInstance) {
   if (!app.env.BILLING_ENABLED) {
@@ -28,7 +29,9 @@ export function serializePayment(payment: BillingPayment) {
   const expired = pending && payment.expiresAt.getTime() <= Date.now();
   return {
     id: payment.id, planId: payment.plan, priceCents: payment.priceCents,
-    status: expired ? "expired" as const : pending && !payment.qrCode ? "creating" as const : payment.status,
+    provider: payment.providerApi === "stripe" ? "stripe" as const : "mercadopago" as const,
+    checkoutUrl: pending && !expired ? payment.checkoutUrl ?? null : null,
+    status: expired ? "expired" as const : pending && !payment.qrCode && !payment.checkoutUrl ? "creating" as const : payment.status,
     createdAt: payment.createdAt, approvedAt: payment.approvedAt, expiresAt: payment.expiresAt,
     qrCode: pending && !expired ? payment.qrCode : null,
     qrCodeBase64: pending && !expired ? payment.qrCodeBase64 : null,
@@ -53,7 +56,7 @@ export async function billingSummary(app: FastifyInstance, ownerId: string) {
       orderBy: { rejectedAt: "desc" },
     });
     return {
-      plans: BILLING_PLANS, pixAvailable: app.env.BILLING_ENABLED,
+      plans: BILLING_PLANS, pixAvailable: app.env.BILLING_ENABLED, paymentProvider: app.env.BILLING_PROVIDER,
       current: { billingExempt: current.billingExempt, planId: current.planId, features: current.features, startsAt: current.startsAt, endsAt: current.endsAt, limit: current.limit, used: current.used, remaining: current.remaining },
       upcoming,
       nextPurchaseStartsAt: current.billingExempt ? null : upcoming.at(-1)?.endsAt ?? (current.planId === "free" ? now : current.endsAt),
@@ -78,12 +81,13 @@ export async function applyVerifiedPayment(app: FastifyInstance, remote: PixPaym
   const payment = await app.prisma.billingPayment.findUnique({ where: { id: remote.external_reference } });
   if (!payment) return null; // Other sales on the same merchant account are unrelated.
   const cents = remote.transaction_amount * 100;
+  const stripe = remote.providerApi === "stripe";
   const awaitingTransaction = orderIdPattern.test(remote.id) && remote.status === "processing" && remote.payment_method_id === null;
   if ((expectedId && payment.id !== expectedId) ||
-    payment.providerApi !== (orderIdPattern.test(remote.id) ? "orders" : "payments") ||
+    payment.providerApi !== (stripe ? "stripe" : orderIdPattern.test(remote.id) ? "orders" : "payments") ||
     (payment.providerId && payment.providerId !== remote.id) ||
-    remote.collector_id !== app.env.MERCADOPAGO_COLLECTOR_ID ||
-    (remote.live_mode !== app.env.MERCADOPAGO_LIVE_MODE && !(awaitingTransaction && remote.live_mode === null)) ||
+    remote.collector_id !== (stripe ? app.env.STRIPE_ACCOUNT_ID : app.env.MERCADOPAGO_COLLECTOR_ID) ||
+    (remote.live_mode !== (stripe ? app.env.STRIPE_LIVE_MODE : app.env.MERCADOPAGO_LIVE_MODE) && !(awaitingTransaction && remote.live_mode === null)) ||
     (remote.payment_method_id !== "pix" && !awaitingTransaction) ||
     remote.currency_id !== "BRL" || Math.abs(cents - payment.priceCents) > 0.000001) {
     throw new AppError(409, "PAYMENT_MISMATCH", "A cobrança não corresponde ao plano solicitado. Entre em contato com o suporte.");
@@ -115,6 +119,7 @@ export async function applyVerifiedPayment(app: FastifyInstance, remote: PixPaym
         approvedAt: current.approvedAt ?? (remote.date_approved ? new Date(remote.date_approved) : null),
         qrCode: status === "pending" ? pix?.qr_code ?? current.qrCode : null,
         qrCodeBase64: status === "pending" ? pix?.qr_code_base64 ?? current.qrCodeBase64 : null,
+        checkoutUrl: status === "pending" ? remote.checkoutUrl ?? null : null,
         ...(remote.date_of_expiration ? { expiresAt: new Date(remote.date_of_expiration) } : {}),
       },
     });
@@ -154,7 +159,7 @@ export async function synchronizePayment(app: FastifyInstance, gateway: PixGatew
 }
 
 export async function createPayment(app: FastifyInstance, gateway: PixGateway, user: AuthUser,
-  input: { planId: PaidPlan; cpf: string; idempotencyKey: string; payerName?: string; deviceId?: string }) {
+  input: { planId: PaidPlan; cpf?: string; idempotencyKey: string; payerName?: string; deviceId?: string }) {
   requirePaymentPurchase(app, user.id);
   const plan = paidPlan(input.planId);
   const payment = await app.prisma.$transaction(async (transaction) => {
@@ -168,7 +173,7 @@ export async function createPayment(app: FastifyInstance, gateway: PixGateway, u
     const now = new Date();
     await transaction.billingPayment.updateMany({
       where: { ownerId: user.id, status: { in: ["creating", "pending"] }, expiresAt: { lte: now } },
-      data: { status: "expired", payerDocument: null, payerDeviceId: null, qrCode: null, qrCodeBase64: null },
+      data: { status: "expired", payerDocument: null, payerDeviceId: null, qrCode: null, qrCodeBase64: null, checkoutUrl: null },
     });
     const pending = await transaction.billingPayment.findFirst({ where: { ownerId: user.id, status: { in: ["creating", "pending"] } } });
     if (pending) {
@@ -181,12 +186,14 @@ export async function createPayment(app: FastifyInstance, gateway: PixGateway, u
     });
     const retryAvailableAt = paymentRetryAvailableAt(recentRejection?.rejectedAt);
     if (retryAvailableAt && retryAvailableAt > now) throw new PaymentRetryLaterError(retryAvailableAt, now);
-    const payerName = parseWith(fullNameSchema, input.payerName ?? user.name);
+    const stripe = app.env.BILLING_PROVIDER === "stripe";
+    const payerName = stripe ? user.name : parseWith(fullNameSchema, input.payerName ?? user.name);
+    if (!stripe && !input.cpf) throw new AppError(400, "PAYER_DATA_REQUIRED", "Informe o CPF do pagador antes de gerar o Pix.");
     return transaction.billingPayment.create({
       data: {
-        id: input.idempotencyKey, ownerId: user.id, providerApi: "orders", plan: input.planId, priceCents: plan.priceCents, jobLimit: plan.jobLimit,
-        payerEmail: user.email, payerName, payerDocument: input.cpf, payerDeviceId: input.deviceId ?? null,
-        expiresAt: new Date(now.getTime() + PIX_EXPIRATION_MS),
+        id: input.idempotencyKey, ownerId: user.id, providerApi: stripe ? "stripe" : "orders", plan: input.planId, priceCents: plan.priceCents, jobLimit: plan.jobLimit,
+        payerEmail: user.email, payerName, payerDocument: stripe ? null : input.cpf, payerDeviceId: stripe ? null : input.deviceId ?? null,
+        createdAt: now, expiresAt: new Date(now.getTime() + (stripe ? STRIPE_CHECKOUT_MS : PIX_EXPIRATION_MS)),
       },
     });
   });

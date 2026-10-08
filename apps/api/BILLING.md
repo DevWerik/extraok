@@ -1,5 +1,11 @@
 # Planos e Pix do ExtraOK
 
+## Stripe para novas cobranças
+
+O projeto também oferece Stripe Checkout, exclusivamente com Pix e pagamento avulso. Configure `BILLING_PROVIDER=stripe` seguindo [STRIPE.md](./STRIPE.md). Os preços, limites, isenção do proprietário e períodos de 30 dias são compartilhados pelos dois provedores. As seções sobre Orders abaixo descrevem Mercado Pago e a reconciliação das cobranças anteriores.
+
+Sem `BILLING_PROVIDER`, o padrão continua `mercadopago` para compatibilidade com instalações existentes. Alterar o provedor não converte cobranças antigas nem ativa o Pix na Stripe. A migration `0006_stripe_checkout` é necessária para esta versão, mesmo durante a transição.
+
 O prestador paga pelo uso do ExtraOK. O pagamento dos serviços extras entre prestador e cliente continua separado.
 
 | Plano | Valor | Atendimentos com primeiro link | Período |

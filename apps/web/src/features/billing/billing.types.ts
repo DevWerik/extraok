@@ -17,10 +17,13 @@ export interface Plan {
 export interface PlansCatalog {
   plans: Plan[]
   pixAvailable: boolean
+  paymentProvider?: 'mercadopago' | 'stripe'
 }
 export type PaymentStatus = 'creating' | 'pending' | 'approved' | 'expired' | 'cancelled' | 'rejected' | 'refunded'
 export interface BillingPayment {
   id: string
+  provider?: 'mercadopago' | 'stripe'
+  checkoutUrl?: string | null
   planId: PaidPlanId
   priceCents: number
   status: PaymentStatus

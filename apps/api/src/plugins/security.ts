@@ -50,7 +50,7 @@ export async function configureSecurity(
 
     // Only this server-to-server route replaces Origin with HMAC authentication.
     // Its handler validates the signature before calling the provider or database.
-    if (request.method === "POST" && request.url.split("?", 1)[0] === BILLING_WEBHOOK_PATH) return;
+    if (request.method === "POST" && [BILLING_WEBHOOK_PATH, "/api/v1/billing/webhooks/stripe"].includes(request.url.split("?", 1)[0]!)) return;
 
     const origin = request.headers.origin;
     if (origin !== env.WEB_ORIGIN) {

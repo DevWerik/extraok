@@ -11,7 +11,8 @@ import { registerClientRoutes } from "./modules/clients/routes.js";
 import { registerDashboardRoutes } from "./modules/dashboard/routes.js";
 import { registerExtraRoutes } from "./modules/extras/routes.js";
 import { registerJobRoutes } from "./modules/jobs/routes.js";
-import { createPixGateway, type PixGateway } from "./modules/billing/mercadopago.js";
+import { type PixGateway } from "./modules/billing/mercadopago.js";
+import { createBillingGateway } from "./modules/billing/gateway.js";
 import { registerBillingRoutes } from "./modules/billing/routes.js";
 import { registerReportRoutes } from "./modules/reports/routes.js";
 import { configureSecurity } from "./plugins/security.js";
@@ -31,7 +32,7 @@ export async function buildApp(
   options: BuildAppOptions = {},
 ): Promise<FastifyInstance> {
   const env = options.env ?? loadEnv();
-  const prisma = options.prisma ?? createPrismaClient(env.DATABASE_URL);
+  const prisma = options.prisma ?? createPrismaClient(env.DATABASE_URL, env.DATABASE_POOL_MAX);
   const ownsPrisma = options.prisma === undefined;
   const app = Fastify({
     bodyLimit: 256 * 1024,
@@ -59,6 +60,7 @@ export async function buildApp(
             "req.body.deviceId",
             'req.headers["x-meli-session-id"]',
             'req.headers["x-signature"]',
+            'req.headers["stripe-signature"]',
             "req.params.token",
           ],
           censor: "[REDACTED]",
@@ -119,7 +121,7 @@ export async function buildApp(
       await registerDashboardRoutes(api);
       await registerReportRoutes(api);
       await registerApprovalRoutes(api);
-      await registerBillingRoutes(api, options.pixGateway ?? createPixGateway(env), {
+      await registerBillingRoutes(api, options.pixGateway ?? createBillingGateway(env), {
         reconciliationEnabled: options.billingReconciliationEnabled,
       });
     },

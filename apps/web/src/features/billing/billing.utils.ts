@@ -37,3 +37,16 @@ export function paymentRejectionMessage(reason: BillingPayment['rejectionReason'
     ? 'O Mercado Pago recusou esta cobrança por análise de risco. Confira o nome completo, e-mail e CPF do pagador antes de uma nova tentativa. Se a recusa persistir, entre em contato com o suporte.'
     : 'O Mercado Pago não aprovou esta cobrança. Confira os dados do pagador antes de uma nova tentativa. Se a recusa persistir, entre em contato com o suporte.'
 }
+
+export function stripeCheckoutUrl(value: string | null | undefined): string | undefined {
+  if (!value) return undefined
+  try {
+    const url = new URL(value)
+    return url.origin === 'https://checkout.stripe.com' && !url.username && !url.password && url.pathname.startsWith('/c/pay/') ? value : undefined
+  } catch { return undefined }
+}
+
+export function billingReturnPayment(search: string): string | null {
+  const id = new URLSearchParams(search).get('payment')
+  return id && /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(id) ? id : null
+}

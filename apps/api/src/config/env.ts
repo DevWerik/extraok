@@ -56,6 +56,7 @@ export const envSchema = z
   .object({
     NODE_ENV: z.enum(["development", "test", "production"]),
     DATABASE_URL: postgresUrlSchema,
+    DATABASE_POOL_MAX: z.coerce.number().int().positive().default(10),
     HOST: z.string().trim().min(1).default("0.0.0.0"),
     PORT: z.coerce.number().int().min(1).max(65_535).default(3333),
     WEB_ORIGIN: webOriginSchema,
@@ -65,6 +66,11 @@ export const envSchema = z
     RESEND_API_KEY: optionalSetting,
     EMAIL_FROM: optionalSetting,
     BILLING_ENABLED: booleanFromEnvironment.default(false),
+    BILLING_PROVIDER: z.enum(["mercadopago", "stripe"]).default("mercadopago"),
+    STRIPE_SECRET_KEY: optionalSetting,
+    STRIPE_WEBHOOK_SECRET: optionalSetting,
+    STRIPE_ACCOUNT_ID: optionalSetting,
+    STRIPE_LIVE_MODE: booleanFromEnvironment.default(false),
     BILLING_OWNER_USER_ID: optionalSetting.pipe(z.string().uuid().transform((value) => value.toLowerCase()).optional()),
     MERCADOPAGO_ACCESS_TOKEN: optionalSetting,
     MERCADOPAGO_WEBHOOK_SECRET: optionalSetting,
@@ -86,7 +92,22 @@ export const envSchema = z
     TRUST_PROXY: booleanFromEnvironment.default(false),
   })
   .superRefine((environment, context) => {
-    if (environment.BILLING_ENABLED) {
+    if (environment.BILLING_ENABLED && environment.BILLING_PROVIDER === "stripe") {
+      const mode = environment.STRIPE_LIVE_MODE ? "live" : "test";
+      if (!new RegExp(`^(?:sk|rk)_${mode}_[A-Za-z0-9]{16,}$`).test(environment.STRIPE_SECRET_KEY ?? "")) {
+        context.addIssue({ code: "custom", path: ["STRIPE_SECRET_KEY"], message: "Configure a chave secreta ou restrita Stripe do mesmo modo de STRIPE_LIVE_MODE." });
+      }
+      if (!/^whsec_[A-Za-z0-9]{16,}$/.test(environment.STRIPE_WEBHOOK_SECRET ?? "")) {
+        context.addIssue({ code: "custom", path: ["STRIPE_WEBHOOK_SECRET"], message: "Configure o segredo do webhook Stripe." });
+      }
+      if (!/^acct_[A-Za-z0-9]{8,}$/.test(environment.STRIPE_ACCOUNT_ID ?? "")) {
+        context.addIssue({ code: "custom", path: ["STRIPE_ACCOUNT_ID"], message: "Configure o ID da conta Stripe recebedora." });
+      }
+      if (environment.NODE_ENV === "production" && !environment.STRIPE_LIVE_MODE) {
+        context.addIssue({ code: "custom", path: ["STRIPE_LIVE_MODE"], message: "Pagamentos em produção exigem STRIPE_LIVE_MODE=true." });
+      }
+    }
+    if (environment.BILLING_ENABLED && environment.BILLING_PROVIDER === "mercadopago") {
       for (const key of ["MERCADOPAGO_ACCESS_TOKEN", "MERCADOPAGO_WEBHOOK_SECRET"] as const) {
         if (!environment[key] || environment[key].length < 32) {
           context.addIssue({ code: "custom", path: [key], message: "Configure a credencial do Mercado Pago com pelo menos 32 caracteres." });

@@ -13,7 +13,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { useBilling, useBillingPayment, useCreatePayment } from '@/features/billing/billing.queries'
 import { useSession } from '@/features/auth/auth.queries'
 import type { BillingSummary, PaidPlanId, Plan } from '@/features/billing/billing.types'
-import { currentPayment, paymentLabels, paymentRejectionMessage, paymentRetryBlocked, pixCountdown, recoverPaymentAttempt, visiblePaymentStatus } from '@/features/billing/billing.utils'
+import { billingReturnPayment, currentPayment, paymentLabels, paymentRejectionMessage, paymentRetryBlocked, pixCountdown, recoverPaymentAttempt, stripeCheckoutUrl, visiblePaymentStatus } from '@/features/billing/billing.utils'
 import { PlanCards } from '@/features/billing/plan-cards'
 import { OwnerAccessPanel } from '@/features/billing/owner-access-panel'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
@@ -33,7 +33,7 @@ export function BillingPage() {
   const [preparing, setPreparing] = useState(false)
   const [preparationError, setPreparationError] = useState('')
   const [now, setNow] = useState(() => Date.now())
-  const [selectedPaymentId, setSelectedPaymentId] = useState<string | null>(null)
+  const [selectedPaymentId, setSelectedPaymentId] = useState<string | null>(() => billingReturnPayment(window.location.search))
   const pendingPayment = billing.data?.payments.find((payment) => payment.status === 'pending' || payment.status === 'creating')
   const recoveredPayment = selection && purchase.isError
     ? recoverPaymentAttempt(billing.data?.payments ?? [], selection.key, selection.plan.id)
@@ -41,7 +41,8 @@ export function BillingPage() {
   const paymentId = recoveredPayment?.id ?? selectedPaymentId ?? pendingPayment?.id ?? null
   const retryBlocked = paymentRetryBlocked(billing.data?.retryAvailableAt, now)
   const busy = preparing || purchase.isPending
-  const canPreparePayment = Boolean(billing.data?.pixAvailable && !billing.data.current.billingExempt)
+  const stripeCheckout = billing.data?.paymentProvider === 'stripe'
+  const canPreparePayment = Boolean(billing.data?.pixAvailable && !billing.data.current.billingExempt && !stripeCheckout)
 
   useEffect(() => {
     if (!canPreparePayment) return
@@ -76,6 +77,16 @@ export function BillingPage() {
     event.preventDefault()
     if (!selection || selection.plan.id === 'free' || busy || billing.data?.current.billingExempt || retryBlocked) return
     setPreparationError('')
+    if (stripeCheckout) {
+      try {
+        const payment = await purchase.mutateAsync({ planId: selection.plan.id as PaidPlanId, idempotencyKey: selection.key })
+        setSelectedPaymentId(payment.id)
+        setSelection(null)
+        const url = stripeCheckoutUrl(payment.checkoutUrl)
+        if (url && payment.status === 'pending') window.location.assign(url)
+      } catch { /* Preserve the same attempt; the form shows the API error. */ }
+      return
+    }
     if (!isFullName(payerName)) {
       setPreparationError('Informe o nome completo do pagador, com nome e sobrenome.')
       return
@@ -140,12 +151,14 @@ export function BillingPage() {
           <DialogHeader><DialogTitle>Pagar {selection?.plan.name} com Pix</DialogTitle><DialogDescription>{selection && formatCurrency(selection.plan.priceCents)} por 30 dias, com até {selection?.plan.jobLimit} atendimentos com link. Sem renovação automática.</DialogDescription></DialogHeader>
           <p className="rounded-lg bg-muted p-3 text-sm">{scheduled ? `O período será adicionado após os já pagos, a partir de ${nextPurchaseDate}. O novo limite e os benefícios começam nessa data.` : 'Seu plano será liberado depois da confirmação do pagamento.'}</p>
           <form onSubmit={(event) => void submit(event)} className="space-y-4">
+            {stripeCheckout ? <p className="text-sm text-muted-foreground">Você será direcionado ao ambiente seguro da Stripe para informar os dados do pagador e pagar com Pix. Depois do pagamento, volte ao ExtraOK para acompanhar a confirmação.</p> : <>
             <div className="space-y-2"><Label htmlFor="billing-name">Nome completo do pagador</Label><Input id="billing-name" name="payerName" autoComplete="name" maxLength={100} value={payerName} onChange={(event) => setPayerName(event.target.value)} required disabled={busy} aria-describedby="billing-payer-help billing-form-error" /></div>
             <div className="space-y-2"><Label htmlFor="billing-email">E-mail do cadastro</Label><Input id="billing-email" type="email" value={session.data?.user.email ?? ''} readOnly aria-describedby="billing-payer-help" /></div>
             <div className="space-y-2"><Label htmlFor="billing-cpf">CPF do pagador</Label><Input id="billing-cpf" name="cpf" inputMode="numeric" autoComplete="off" maxLength={14} value={cpf} onChange={(event) => setCpf(event.target.value.replace(/[^\d.-]/g, '').slice(0, 14))} required disabled={busy} aria-describedby="billing-payer-help billing-form-error" /></div>
             <p id="billing-payer-help" className="text-xs text-muted-foreground">Confira o nome completo como consta no documento. O nome, o CPF e o e-mail devem identificar o pagador. A correção do nome vale para esta cobrança.</p>
+            </>}
             <div id="billing-form-error" role="alert">{preparationError ? <p className="text-sm text-destructive">{preparationError}</p> : purchase.isError && <p className="text-sm text-destructive">{isServiceError(purchase.error) ? purchase.error.message : 'Não foi possível gerar o Pix. Tente novamente.'}</p>}</div>
-            <Button type="submit" className="w-full" disabled={busy || retryBlocked || !isFullName(payerName) || !session.data?.user.email || cpf.replace(/\D/g, '').length !== 11}><QrCode className="size-4" aria-hidden="true" />{busy ? 'Gerando Pix...' : `Gerar Pix de ${selection ? formatCurrency(selection.plan.priceCents) : ''}`}</Button>
+            <Button type="submit" className="w-full" disabled={busy || retryBlocked || (!stripeCheckout && (!isFullName(payerName) || !session.data?.user.email || cpf.replace(/\D/g, '').length !== 11))}><QrCode className="size-4" aria-hidden="true" />{busy ? 'Preparando pagamento...' : stripeCheckout ? 'Continuar para pagar com Pix' : `Gerar Pix de ${selection ? formatCurrency(selection.plan.priceCents) : ''}`}</Button>
           </form>
         </DialogContent>
       </Dialog>
@@ -161,6 +174,7 @@ function PixPaymentPanel({ id, summary, onClose }: { id: string; summary: Billin
   const [now, setNow] = useState(() => Date.now())
   const payment = currentPayment(query.data, summaryPayment)
   const status = payment ? visiblePaymentStatus(payment.status, payment.expiresAt, now) : undefined
+  const checkoutUrl = stripeCheckoutUrl(payment?.checkoutUrl)
 
   useEffect(() => {
     if (status !== 'creating' && status !== 'pending') return
@@ -182,6 +196,7 @@ function PixPaymentPanel({ id, summary, onClose }: { id: string; summary: Billin
     <CardHeader><h3 className="text-xl font-bold text-primary">{status ? paymentLabels[status] : 'Consultando cobrança...'}</h3>{payment && <p className="text-sm text-muted-foreground">{summary.plans.find((plan) => plan.id === payment.planId)?.name} · {formatCurrency(payment.priceCents)}</p>}</CardHeader>
     <CardContent className="space-y-4">
       <div role="status" aria-live="polite">{status === 'approved' ? <p className="flex items-start gap-2 font-semibold text-success"><CheckCircle2 className="size-5 shrink-0" aria-hidden="true" />Pagamento confirmado. Consulte acima a validade do período liberado.</p> : status === 'creating' ? <p>Estamos preparando sua cobrança. Ela aparecerá aqui automaticamente.</p> : status === 'pending' ? <p className="text-sm">Escaneie o QR Code no aplicativo do seu banco ou use o Pix Copia e Cola. A confirmação aparecerá automaticamente.</p> : status === 'expired' ? <p className="text-sm">A validade deste Pix terminou. Se você já pagou, atualize a cobrança antes de gerar outro Pix.</p> : status === 'rejected' ? <p className="text-sm">{paymentRejectionMessage(payment?.rejectionReason ?? null)} Nenhum plano foi liberado.</p> : status === 'refunded' ? <p className="text-sm">O período desta cobrança foi desativado após o reembolso. Seu histórico de atendimentos foi preservado.</p> : status ? <p className="text-sm">Esta cobrança não liberou um plano. Você pode escolher uma nova opção acima.</p> : null}</div>
+      {status === 'pending' && checkoutUrl && <div className="space-y-3"><p className="text-sm">O QR Code e o Pix Copia e Cola estão disponíveis no checkout da Stripe. Ao retornar, a confirmação será consultada automaticamente.</p><Button asChild><a href={checkoutUrl} referrerPolicy="no-referrer">Continuar pagamento na Stripe</a></Button></div>}
       {payment && status === 'pending' && payment.qrCode && <div className="grid items-center gap-5 sm:grid-cols-[12rem_1fr]">
         {payment.qrCodeBase64 && <img src={`data:image/png;base64,${payment.qrCodeBase64}`} alt={`QR Code para pagar ${formatCurrency(payment.priceCents)} via Pix`} width={192} height={192} className="mx-auto rounded-lg border bg-white p-2" />}
         <div className="min-w-0 space-y-3"><p className="text-sm font-semibold">Validade: <span className="tabular-nums">{pixCountdown(payment.expiresAt, now)}</span></p><Label htmlFor={`pix-code-${id}`}>Pix Copia e Cola</Label><textarea id={`pix-code-${id}`} readOnly value={payment.qrCode} className="min-h-24 w-full resize-none rounded-lg border bg-muted p-3 text-xs break-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onFocus={(event) => event.target.select()} /><Button onClick={() => void copyPix()} className="w-full sm:w-auto"><Copy className="size-4" aria-hidden="true" />{copied ? 'Pix copiado' : 'Copiar código Pix'}</Button></div>

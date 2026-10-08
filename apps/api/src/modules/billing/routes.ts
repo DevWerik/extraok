@@ -9,10 +9,11 @@ import { validWebhookSignature, type PixGateway } from "./mercadopago.js";
 import { providerResourceIdPattern } from "./orders.js";
 import { deviceIdPattern, PaymentRetryLaterError } from "./payment-risk.js";
 import { applyVerifiedPayment, billingSummary, createPayment, reconcilePayments, requireBilling, requirePaymentPurchase, serializePayment, synchronizePayment } from "./service.js";
+import { registerStripeWebhook } from "./stripe-webhook.js";
 
 const purchaseSchema = z.object({
   planId: z.enum(["pro", "business"]),
-  cpf: z.string().max(18).transform((value) => value.replace(/[.\-\s]/g, "")).refine(validCpf, "Informe um CPF válido para gerar o Pix."),
+  cpf: z.string().max(18).transform((value) => value.replace(/[.\-\s]/g, "")).refine(validCpf, "Informe um CPF válido para gerar o Pix.").optional(),
   idempotencyKey: z.string().uuid(),
   // Optional for older clients/attempts; new checkout sends reviewed payer data.
   payerName: fullNameSchema.optional(),
@@ -24,7 +25,7 @@ const notificationSchema = z.object({ "data.id": z.string().regex(providerResour
 export async function registerBillingRoutes(app: FastifyInstance, gateway: PixGateway, options: { reconciliationEnabled?: boolean } = {}) {
   app.get("/billing/plans", async (_request, reply) => {
     reply.header("Cache-Control", "no-store");
-    return { plans: BILLING_PLANS, pixAvailable: app.env.BILLING_ENABLED };
+    return { plans: BILLING_PLANS, pixAvailable: app.env.BILLING_ENABLED, paymentProvider: app.env.BILLING_PROVIDER };
   });
   app.get("/billing", { preHandler: requireAuth }, async (request, reply) => {
     reply.header("Cache-Control", "no-store");
@@ -54,6 +55,7 @@ export async function registerBillingRoutes(app: FastifyInstance, gateway: PixGa
   });
   app.post("/billing/webhooks/mercadopago", { config: { rateLimit: { max: 180, timeWindow: "1 minute" } } }, async (request, reply) => {
     requireBilling(app);
+    if (!app.env.MERCADOPAGO_WEBHOOK_SECRET) throw unauthorized("Notificação inválida.");
     const query = parseWith(notificationSchema, request.query);
     const signature = request.headers["x-signature"];
     const requestId = request.headers["x-request-id"];
@@ -64,6 +66,8 @@ export async function registerBillingRoutes(app: FastifyInstance, gateway: PixGa
     await applyVerifiedPayment(app, remote);
     return reply.status(200).send({ received: true });
   });
+
+  await registerStripeWebhook(app, gateway);
 
   if (app.env.BILLING_ENABLED && options.reconciliationEnabled !== false) {
     let running: Promise<void> | undefined;

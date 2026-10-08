@@ -16,6 +16,7 @@ test("loadEnv preserva o modo explicito, aplica defaults e normaliza a origem", 
   assert.equal(environment.NODE_ENV, "development");
   assert.equal(environment.HOST, "0.0.0.0");
   assert.equal(environment.PORT, 3333);
+  assert.equal(environment.DATABASE_POOL_MAX, 10);
   assert.equal(environment.WEB_ORIGIN, "https://app.extraok.com.br");
   assert.equal(environment.SESSION_TTL_DAYS, 30);
   assert.equal(environment.SESSION_IDLE_HOURS, 12);
@@ -41,6 +42,14 @@ test("loadEnv exige um NODE_ENV explicito e valido", () => {
     loadEnv({ ...requiredEnvironment, NODE_ENV: "test" }).NODE_ENV,
     "test",
   );
+});
+
+test("loadEnv permite uma conexao para Prisma Dev e rejeita limites invalidos", () => {
+  assert.equal(loadEnv({ ...requiredEnvironment, DATABASE_POOL_MAX: "1" }).DATABASE_POOL_MAX, 1);
+  // pg treats max=0 as its default pool size, which would reopen multiple connections.
+  for (const value of ["0", "-1", "1.5", "", "invalid", "Infinity"]) {
+    assert.throws(() => loadEnv({ ...requiredEnvironment, DATABASE_POOL_MAX: value }));
+  }
 });
 
 test("loadEnv converte numeros e booleanos vindos do processo", () => {

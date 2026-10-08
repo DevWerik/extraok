@@ -225,6 +225,7 @@ enum BillingPaymentStatus {
 enum BillingProviderApi {
   payments
   orders
+  stripe
 
   @@map("billing_provider_api")
 }
@@ -236,7 +237,8 @@ model BillingPayment {
   priceCents        Int                  @map("price_cents")
   jobLimit          Int                  @map("job_limit")
   status            BillingPaymentStatus @default(creating)
-  providerId        String?              @unique @map("provider_id") @db.VarChar(64)
+  providerId        String?              @unique @map("provider_id") @db.VarChar(255)
+  checkoutUrl       String?              @map("checkout_url") @db.Text
   providerApi       BillingProviderApi   @default(orders) @map("provider_api")
   payerEmail        String               @map("payer_email") @db.VarChar(320)
   payerName         String               @map("payer_name") @db.VarChar(120)

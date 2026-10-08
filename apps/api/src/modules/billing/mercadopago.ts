@@ -32,6 +32,8 @@ const paymentSchema = z.object({
 });
 
 export type PixPayment = Omit<z.infer<typeof paymentSchema>, "live_mode" | "payment_method_id"> & {
+  providerApi?: "stripe";
+  checkoutUrl?: string | null;
   // Null is allowed only while Orders is still creating its Pix transaction.
   live_mode: boolean | null;
   payment_method_id: string | null;

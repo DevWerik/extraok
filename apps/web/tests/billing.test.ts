@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { currentPayment, paymentRejectionMessage, paymentRetryBlocked, pixCountdown, recoverPaymentAttempt, visiblePaymentStatus } from '../src/features/billing/billing.utils.ts'
+import { billingReturnPayment, currentPayment, paymentRejectionMessage, paymentRetryBlocked, pixCountdown, recoverPaymentAttempt, stripeCheckoutUrl, visiblePaymentStatus } from '../src/features/billing/billing.utils.ts'
 import { isFullName, normalizeFullName } from '../src/lib/person-name.ts'
 import { readMercadoPagoDeviceId } from '../src/lib/mercadopago-device.ts'
 import type { BillingPayment } from '../src/features/billing/billing.types.ts'
@@ -11,6 +11,30 @@ const payment: BillingPayment = {
   status: 'creating', createdAt: '2026-10-06T12:00:00Z', expiresAt: '2026-10-06T12:30:00Z',
   approvedAt: null, qrCode: null, qrCodeBase64: null, rejectionReason: null, retryAvailableAt: null,
 }
+
+test('retorno Stripe aceita apenas referência interna e checkout aceita somente domínio oficial HTTPS', () => {
+  assert.equal(billingReturnPayment(`?payment=${payment.id}&status=paid`), payment.id)
+  for (const search of ['', '?payment=cs_test_forged', '?payment=https://evil.test', '?status=paid']) assert.equal(billingReturnPayment(search), null)
+  const url = 'https://checkout.stripe.com/c/pay/cs_test_123#token'
+  assert.equal(stripeCheckoutUrl(url), url)
+  for (const value of [undefined, null, '', '//checkout.stripe.com/c/pay/id', 'javascript:alert(1)',
+    'https://checkout.stripe.com.evil.test/c/pay/id', 'https://user:pass@checkout.stripe.com/c/pay/id',
+    'http://checkout.stripe.com/c/pay/id', 'https://evil.test/c/pay/id']) assert.equal(stripeCheckoutUrl(value), undefined)
+})
+
+test('proxy Stripe preserva bytes exatos e assinatura para verificação no backend', async (context) => {
+  const raw = '{ "id": "evt_test", "data": {"name":"João"} }\n'
+  context.mock.method(globalThis, 'fetch', async (request: Request) => {
+    assert.equal(request.url, 'https://api.example.test/api/v1/billing/webhooks/stripe')
+    assert.equal(request.headers.get('stripe-signature'), 't=1789400000,v1=signature')
+    assert.equal(await request.text(), raw)
+    return Response.json({ received: true })
+  })
+  const response = await worker.fetch(new Request('https://app.example.test/api/v1/billing/webhooks/stripe', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'Stripe-Signature': 't=1789400000,v1=signature' }, body: raw,
+  }), { API_ORIGIN: 'https://api.example.test', ASSETS: { fetch: async () => new Response('SPA') } })
+  assert.equal(response.status, 200)
+})
 
 test('dados do pagador aceitam nomes compostos reais e rejeitam nome isolado e documentos no nome', () => {
   for (const name of ['João da Silva', "Ana-Maria D’Ávila", "José D'Ávila", 'Érica Souza']) assert.equal(isFullName(name), true)
