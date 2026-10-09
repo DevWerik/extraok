@@ -1,0 +1,50 @@
+name: Availability and alerts
+on:
+  workflow_dispatch:
+    inputs:
+      send_test_alert:
+        description: Enviar um e-mail de teste ao destinatário configurado
+        type: boolean
+        default: false
+  schedule:
+    - cron: '7,22,37,52 * * * *'
+permissions:
+  contents: read
+concurrency:
+  group: availability-monitor
+  cancel-in-progress: false
+jobs:
+  monitor:
+    if: github.event_name == 'workflow_dispatch' || vars.OPS_MONITOR_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+      - name: Verify availability and notify on failure
+        if: inputs.send_test_alert != true
+        env:
+          OPS_RESEND_API_KEY: ${{ secrets.OPS_RESEND_API_KEY }}
+          OPS_ALERT_FROM: ${{ vars.OPS_ALERT_FROM }}
+          OPS_ALERT_TO: ${{ vars.OPS_ALERT_TO }}
+        run: node ops/monitor.mjs --notify
+      - name: Send an explicit test alert
+        if: github.event_name == 'workflow_dispatch' && inputs.send_test_alert == true
+        env:
+          OPS_RESEND_API_KEY: ${{ secrets.OPS_RESEND_API_KEY }}
+          OPS_ALERT_FROM: ${{ vars.OPS_ALERT_FROM }}
+          OPS_ALERT_TO: ${{ vars.OPS_ALERT_TO }}
+        run: node ops/monitor.mjs --send-test-alert
+      - name: Preserve technical report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: availability-${{ github.run_id }}
+          path: .ops-state/monitor-report.json
+          include-hidden-files: true
+          retention-days: 14
+          if-no-files-found: ignore

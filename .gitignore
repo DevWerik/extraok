@@ -10,3 +10,7 @@ node_modules/
 !**/.env.example
 
 *.log
+.backups/
+.ops-state/
+*.pgdump
+*.pgdump.enc

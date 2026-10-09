@@ -113,7 +113,7 @@ O proxy TLS deve remover qualquer `X-Forwarded-For` recebido do cliente e aplica
 Antes de liberar acesso público:
 
 - armazene `.env` fora do versionamento e entregue segredos por um cofre ou mecanismo seguro da plataforma;
-- faça backup e teste a restauração do volume PostgreSQL;
+- configure a retenção do PostgreSQL e teste a restauração em destino separado; para Neon/Render, siga [o guia operacional](ops/README.md);
 - monitore `/ready`, logs, uso de disco e expiração do certificado TLS;
 - mantenha a rotação de logs configurada no Compose ou envie-os a um coletor externo;
 - execute e acompanhe as migrações antes de receber tráfego da nova versão;
@@ -121,7 +121,7 @@ Antes de liberar acesso público:
 - fixe imagens por digest no ambiente de deploy e defina limites de CPU, memória e processos após medir a carga real;
 - publique termos e política de privacidade revisados para o valor configurado em `TERMS_VERSION`.
 
-O núcleo do MVP está persistente e autenticado. A recuperação de senha por código enviado por e-mail está implementada e depende da configuração do Resend e da ativação de `PASSWORD_RESET_ENABLED`; consulte [configuração e validação da recuperação](apps/api/README.md#recuperação-de-senha-por-e-mail). Verificação de e-mail no cadastro, segundo fator, observabilidade centralizada e rotina automatizada de backup ainda não estão implementados. Domínio, TLS, banco gerenciado e credenciais de deploy precisam ser fornecidos pelo ambiente de hospedagem.
+O núcleo do MVP está persistente e autenticado. A recuperação de senha por código enviado por e-mail está implementada e depende da configuração do Resend e da ativação de `PASSWORD_RESET_ENABLED`; consulte [configuração e validação da recuperação](apps/api/README.md#recuperação-de-senha-por-e-mail). Verificação de e-mail no cadastro, segundo fator e observabilidade centralizada ainda não estão implementados. Scripts e workflows de backup criptografado, restauração isolada e monitoramento estão preparados, mas sua ativação, retenção do Neon e entrega de alertas dependem da configuração e validação na hospedagem; consulte [operação e evidências](ops/README.md). Domínio, TLS, banco gerenciado e credenciais de deploy precisam ser fornecidos pelo ambiente de hospedagem.
 
 ## Segurança operacional
 

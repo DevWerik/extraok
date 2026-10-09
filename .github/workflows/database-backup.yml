@@ -1,0 +1,67 @@
+name: Encrypted database backup and restore drill
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 4 * * *'
+permissions:
+  contents: read
+concurrency:
+  group: database-backup
+  cancel-in-progress: false
+jobs:
+  backup:
+    if: github.event_name == 'workflow_dispatch' || vars.OPS_BACKUP_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      BACKUP_DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+      BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+      BACKUP_OUTPUT_DIR: .backups
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+      - name: Validate the failure notification channel configuration
+        env:
+          OPS_RESEND_API_KEY: ${{ secrets.OPS_RESEND_API_KEY }}
+          OPS_ALERT_FROM: ${{ vars.OPS_ALERT_FROM }}
+          OPS_ALERT_TO: ${{ vars.OPS_ALERT_TO }}
+        run: node ops/monitor.mjs --check-config
+      - name: Download the PostgreSQL client and disposable restore image
+        run: docker pull postgres:17.10-alpine3.22
+      - name: Read-only dump and authenticated encryption
+        run: node ops/backup.mjs
+      - name: Restore into a new disposable database
+        run: node ops/restore-drill.mjs .backups/*.pgdump.enc
+      - name: Preserve only encrypted backups
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: database-backup-${{ github.run_id }}
+          path: .backups/*.pgdump.enc
+          include-hidden-files: true
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Preserve restore report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: restore-${{ github.run_id }}
+          path: .ops-state/restore-report.json
+          include-hidden-files: true
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Notify failed backup or restore
+        if: failure()
+        env:
+          OPS_RESEND_API_KEY: ${{ secrets.OPS_RESEND_API_KEY }}
+          OPS_ALERT_FROM: ${{ vars.OPS_ALERT_FROM }}
+          OPS_ALERT_TO: ${{ vars.OPS_ALERT_TO }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { notify } from './ops/monitor.mjs'
+          await notify({ id: `backup-${process.env.GITHUB_RUN_ID}`, checkedAt: new Date().toISOString(), checks: [{ name: 'Backup ou restauração', ok: false, reason: 'Falha na execução; consulte o relatório no GitHub Actions.' }] })
+          NODE
