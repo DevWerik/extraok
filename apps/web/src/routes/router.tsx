@@ -14,6 +14,22 @@ export const router = createBrowserRouter([
     errorElement: <RouteError />,
   },
   {
+    path: '/termos',
+    lazy: async () => {
+      const { LegalPage } = await import('@/pages/legal-page')
+      return { Component: () => <LegalPage document="terms" /> }
+    },
+    errorElement: <RouteError />,
+  },
+  {
+    path: '/privacidade',
+    lazy: async () => {
+      const { LegalPage } = await import('@/pages/legal-page')
+      return { Component: () => <LegalPage document="privacy" /> }
+    },
+    errorElement: <RouteError />,
+  },
+  {
     element: <GuestRoute />,
     errorElement: <RouteError />,
     children: [

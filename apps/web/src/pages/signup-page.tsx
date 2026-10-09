@@ -1,7 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { ArrowRight } from 'lucide-react'
 import { useForm } from 'react-hook-form'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { AuthLayout } from '@/components/layout/auth-layout'
 import { Button } from '@/components/ui/button'
@@ -71,11 +71,14 @@ export function SignupPage() {
           <PasswordField id="signup-confirm-password" label="Confirme a senha" autoComplete="new-password" registration={register('confirmPassword')} error={errors.confirmPassword?.message} />
         </div>
         <div>
-          <label className="flex cursor-pointer items-start gap-3 text-sm leading-relaxed text-muted-foreground">
-            <input type="checkbox" className="mt-1 size-4 rounded border-input accent-[var(--success)]" {...register('acceptTerms')} />
-            <span>Confirmo que li e concordo com o uso dos meus dados para criar e operar minha conta no ExtraOK.</span>
-          </label>
-          {errors.acceptTerms && <p className="mt-2 text-sm text-destructive">{errors.acceptTerms.message}</p>}
+          <div className="flex items-start gap-3 text-sm leading-relaxed text-muted-foreground">
+            <input id="signup-terms" type="checkbox" className="mt-1 size-4 shrink-0 rounded border-input accent-[var(--success)]" aria-invalid={Boolean(errors.acceptTerms)} aria-describedby={errors.acceptTerms ? 'signup-terms-error' : undefined} {...register('acceptTerms')} />
+            <div>
+              <label htmlFor="signup-terms" className="cursor-pointer">Confirmo que li e concordo com o uso dos meus dados para criar e operar minha conta no ExtraOK.</label>
+              <p className="mt-1">Consulte os <Link to="/termos" target="_blank" rel="noopener noreferrer" className="rounded-sm font-semibold text-primary underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Termos de Uso<span className="sr-only"> (abre em nova aba)</span></Link> e a <Link to="/privacidade" target="_blank" rel="noopener noreferrer" className="rounded-sm font-semibold text-primary underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Política de Privacidade<span className="sr-only"> (abre em nova aba)</span></Link>.</p>
+            </div>
+          </div>
+          {errors.acceptTerms && <p id="signup-terms-error" className="mt-2 text-sm text-destructive">{errors.acceptTerms.message}</p>}
         </div>
         {signUp.isError && <FormFeedback tone="error" message={isServiceError(signUp.error) ? signUp.error.message : 'Não foi possível criar sua conta.'} />}
         <Button type="submit" size="lg" className="w-full" disabled={signUp.isPending}>{signUp.isPending ? 'Criando conta...' : 'Criar conta'}{!signUp.isPending && <ArrowRight className="size-4" />}</Button>

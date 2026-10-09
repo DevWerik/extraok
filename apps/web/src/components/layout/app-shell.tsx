@@ -3,6 +3,7 @@ import { Outlet } from 'react-router-dom'
 import { AppHeader } from '@/components/layout/app-header'
 import { AppSidebar } from '@/components/layout/app-sidebar'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
+import { LegalLinks } from '@/components/legal/legal-links'
 
 export function AppShell() {
   const [menuOpen, setMenuOpen] = useState(false)
@@ -22,9 +23,10 @@ export function AppShell() {
 
       <div className="min-h-screen lg:pl-64">
         <AppHeader onOpenMenu={() => setMenuOpen(true)} />
-        <main className="mx-auto w-full max-w-[92rem] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+        <main className="mx-auto w-full max-w-368 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
           <Outlet />
         </main>
+        <footer className="px-4 pb-6"><LegalLinks /></footer>
       </div>
     </div>
   )

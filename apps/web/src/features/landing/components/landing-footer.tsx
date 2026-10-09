@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom"
 
 import { BrandLogo } from "@/features/landing/components/brand-logo"
+import { LegalLinks } from '@/components/legal/legal-links'
 
 export function LandingFooter() {
   return (
@@ -17,6 +18,7 @@ export function LandingFooter() {
           </Link>
         </nav>
       </div>
+      <div className="mx-auto mt-6 max-w-7xl border-t pt-5"><LegalLinks /></div>
     </footer>
   )
 }

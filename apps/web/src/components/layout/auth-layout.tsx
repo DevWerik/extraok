@@ -3,6 +3,7 @@ import { CheckCircle2, Smartphone, TrendingUp } from "lucide-react"
 import { Link } from "react-router-dom"
 
 import { BrandLogo } from "@/features/landing/components/brand-logo"
+import { LegalLinks } from '@/components/legal/legal-links'
 
 interface AuthLayoutProps {
   alternateLinkLabel: string
@@ -89,6 +90,7 @@ export function AuthLayout({
           <p className="mt-3 text-pretty leading-7 text-muted-foreground">{description}</p>
           <div className="mt-7">{children}</div>
         </div>
+        <LegalLinks />
       </section>
     </main>
   )
