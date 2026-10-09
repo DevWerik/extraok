@@ -42,7 +42,7 @@ export async function diagnoseActions({ repository, token, monitorEnabled, backu
       return null
     }
   }
-  const workflowPath = '/actions/workflows/availability.yml'
+  const workflowPath = '/actions/workflows/monitor-automatico.yml'
   const [repo, workflow, scheduled, recent] = await Promise.all([
     get(''),
     get(workflowPath),
@@ -50,7 +50,7 @@ export async function diagnoseActions({ repository, token, monitorEnabled, backu
     get(`${workflowPath}/runs?per_page=10`),
   ])
   const source = repo?.default_branch
-    ? await get(`/contents/.github/workflows/availability.yml?ref=${encodeURIComponent(repo.default_branch)}`)
+    ? await get(`/contents/.github/workflows/monitor-automatico.yml?ref=${encodeURIComponent(repo.default_branch)}`)
     : null
   const sourceText = source?.encoding === 'base64' && typeof source.content === 'string'
     ? Buffer.from(source.content, 'base64').toString('utf8') : null
