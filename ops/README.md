@@ -2,7 +2,7 @@
 
 Responsável informado: **ExtraOk**. Contato público de suporte e privacidade: **extraokweb@gmail.com**. O usuário mantém outro e-mail que acompanha na conta do Render. A automação usa `OPS_ALERT_TO`, de preenchimento obrigatório, e não altera o destinatário do Render.
 
-O usuário escolheu fazer a configuração administrativa pelos painéis. Nenhuma credencial precisa ser enviada no chat. As ferramentas abaixo são alternativas locais e automação futura; não significam que os provedores já estejam configurados.
+O usuário escolheu fazer a configuração administrativa pelos painéis. Nenhuma credencial precisa ser enviada no chat. O estado verificado está registrado abaixo; as demais seções documentam os procedimentos para operação e novas configurações.
 
 ## Estado verificado em 09/10/2026
 
@@ -11,7 +11,11 @@ O usuário escolheu fazer a configuração administrativa pelos painéis. Nenhum
 - Site, `/health`, `/ready` direto no Render e `/ready` pelo Cloudflare: passaram na consulta pública. `/ready` executa uma consulta no banco; isso não comprova backup ou retenção.
 - Retenção Neon: o responsável confirmou pelo chat que selecionou **6h** e salvou no painel. Capturas confirmaram criação de uma branch com dados históricos de `production` em 09/10/2026 às 10:26 GMT-3. O operador executou a consulta na branch recuperada: 14 tabelas acessíveis, seis migrações, zero migrações incompletas, vínculos inválidos, extras órfãos e constraints não validadas. Evidência fornecida pelo operador; sem consulta administrativa autenticada pela ferramenta nem comparação integral dos registros no mesmo timestamp.
 - Render: operador confirmou Health Check Path `/ready`; evento do painel e logs enviados mostram alteração, deploy live e HTTP 200 nas verificações. Capturas mostram os padrões do workspace em **Email** e **Only failure notifications**, e o serviço da API em **Use workspace default (Only failure notifications)**. O usuário informou o e-mail da conta e confirmou que acompanha essa caixa. Configuração conferida; **entrega efetiva de alerta ainda não testada**.
-- Monitor no GitHub: teste de e-mail recebido, confirmado pelo operador; captura da execução manual #4 no commit `cde9a07` mostra Success. O operador confirmou `OPS_MONITOR_ENABLED=true`; a primeira execução automática ainda precisa ser conferida. **O workflow de backup real e seu agendamento continuam pendentes de configuração e teste.**
+- Monitor no GitHub: teste de e-mail recebido, confirmado pelo operador; captura da execução manual #4 no commit `cde9a07` mostra Success. O operador confirmou `OPS_MONITOR_ENABLED=true`. Capturas, inclusive após 13:10 GMT-3, mostram zero resultados para `event:schedule`, mesmo com o workflow habilitado e o cron publicado na branch padrão `main`. O cron foi ajustado para os minutos 09, 24, 39 e 54 como tentativa de reativação, mantendo 15 minutos entre execuções. A causa não foi estabelecida e o disparo automático ainda não foi comprovado.
+- Backup real no GitHub: job manual #1 no commit `baf5c96` concluído, com dois artefatos. O relatório fornecido pelo operador confirma restauração aprovada em 09/10/2026 às 12:24 GMT-3, em container novo: 14 tabelas, seis migrações, 18 chaves estrangeiras, 12 checks, zero constraints não validadas e limpeza concluída. Não houve comparação linha a linha com a origem no mesmo instante.
+- O operador confirmou os secrets de backup e a cópia recuperável da chave de criptografia em seu gerenciador de senhas, fora do GitHub. Confirmou também `OPS_BACKUP_ENABLED=true` em Repository variables: programação diária às **01:17 em Brasília**, com retenção dos artefatos criptografados por **14 dias**. A primeira execução agendada do backup ainda não foi verificada; o teste aprovado foi manual.
+
+- Recuperação de senha: o operador confirmou o teste funcional e o recebimento com e-mail diferente daquele cadastrado na conta Resend. Os itens de envio a outro destinatário e recuperação estão concluídos por essa confirmação. A ferramenta não reexecutou o fluxo nem conferiu o domínio/remetente atual no painel.
 
 ## 1. Neon: retenção e recuperação pelo painel
 
@@ -31,7 +35,7 @@ Não use **Restore from history** com a branch principal como destino para este 
 3. Confira nos dados da conta/workspace o endereço operacional e o recebimento dos alertas. O usuário escolheu manter o e-mail existente da conta do Render, que acompanha. O contato público `extraokweb@gmail.com` no site não configura o destinatário do Render. O Render documenta alertas de serviço indisponível, deploy e cron com falha. [Notificações](https://render.com/docs/notifications).
 4. Se o painel oferecer um teste de notificação, execute-o e confirme o recebimento. Caso contrário, use um serviço de teste separado para provocar uma falha controlada e verificar o canal. Não derrube a API nem troque a conexão do banco de produção para testar alertas. Sem recebimento confirmado, marque a entrega como pendente.
 
-Os alertas nativos da API não cobrem sozinhos todos os problemas do frontend Cloudflare. O monitor externo preparado abaixo consulta o site e as rotas de saúde, mas ainda requer ativação e teste do destinatário.
+Os alertas nativos da API não cobrem sozinhos todos os problemas do frontend Cloudflare. O monitor externo consulta o site e as rotas de saúde; o teste de e-mail e a execução manual passaram. A ativação foi confirmada pelo operador, e a execução automática ainda precisa ser conferida.
 
 ## 3. Ferramentas locais
 
@@ -80,7 +84,7 @@ No GitHub, `OPS_ALERT_FROM` aceita somente o endereço, sem o nome de exibição
 
 ## 4. Automação no GitHub
 
-- `.github/workflows/availability.yml`: programação a cada 15 minutos, até quatro tentativas com timeout de 25 segundos por endpoint e intervalo de cinco segundos (janela aproximada de 115 segundos), checagem do HTML/JSON e alerta se a falha persistir. Interrompe as tentativas ao obter todas as respostas válidas; preserva cada resultado em `attemptHistory` e indica recuperação em `recoveredAfterRetry`.
+- `.github/workflows/availability.yml`: programação nos minutos 09, 24, 39 e 54 de cada hora (intervalo de 15 minutos), até quatro tentativas com timeout de 25 segundos por endpoint e intervalo de cinco segundos (janela aproximada de 115 segundos), checagem do HTML/JSON e alerta se a falha persistir. Interrompe as tentativas ao obter todas as respostas válidas; preserva cada resultado em `attemptHistory` e indica recuperação em `recoveredAfterRetry`.
 - O operador confirmou que a API usa Render Free. Esse plano suspende o serviço após 15 minutos sem tráfego e pode levar cerca de um minuto para iniciá-lo. A janela do monitor acomoda essa inicialização, mas não elimina a demora percebida pelos usuários nem garante recuperação. Timeouts isolados não comprovam que essa foi a causa: consulte os logs do Render no mesmo horário. [Comportamento do Render Free](https://render.com/docs/free#spinning-down-on-idle).
 - `.github/workflows/database-backup.yml`: programação diária às 04:17 UTC (01:17 em Brasília), dump criptografado, restauração isolada e retenção dos artefatos criptografados por 14 dias.
 - Cada agendamento depende de sua variável: `OPS_MONITOR_ENABLED=true` / `OPS_BACKUP_ENABLED=true` em **GitHub → Settings → Secrets and variables → Actions → Variables**. O disparo manual executa mesmo sem essas flags. O estado confirmado pelo operador está registrado no início deste documento.
