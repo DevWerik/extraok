@@ -93,6 +93,12 @@ No GitHub, `OPS_ALERT_FROM` aceita somente o endereço, sem o nome de exibição
 - O acesso aos artefatos também deve ser restrito. Mantenha a chave fora dos artefatos e preserve uma cópia dos backups fora do mesmo domínio de falha conforme sua necessidade. A retenção de 14 dias desses arquivos não altera a janela histórica do Neon.
 - GitHub Actions pode atrasar ou descartar execuções agendadas. Essa programação não garante SLA de 15 minutos nem execução diária pontual; confira a idade do último backup bem-sucedido e mantenha os alertas nativos do provedor. [Limitações de schedule](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule).
 
+### Diagnóstico de ausência de execuções agendadas
+
+Se o filtro `event:schedule` permanecer vazio, execute **Actions → Diagnose scheduled workflows → Run workflow → main**. O workflow usa o token automático do GitHub com `contents: read` e `actions: read`, sem secrets da aplicação. O script `ops/diagnose-actions.mjs` consulta apenas metadados por GET: branch padrão, estado do workflow, cron publicado, flags habilitadas, contagem de eventos `schedule`, últimas execuções e jobs do último agendamento, se houver.
+
+O resultado aparece em **Summary → Diagnóstico do agendamento** e no artefato `actions-diagnostics-<run_id>`. Execução verde significa que as consultas terminaram; não comprova disparo do monitor. Falha de acesso à API fica explícita, com contagem `null` em vez de zero. O diagnóstico não altera o agendamento nem envia alertas. [API de workflows](https://docs.github.com/en/rest/actions/workflows#get-a-workflow), [API de execuções](https://docs.github.com/en/rest/actions/workflow-runs#list-workflow-runs-for-a-workflow).
+
 ## 5. Documentos públicos e CSP
 
 Conteúdo em `apps/web/src/features/legal/legal-content.ts`; rotas públicas `/termos` e `/privacidade`. Cadastro abre os links em nova aba. Identidade e contato refletem as informações fornecidas pelo responsável. Os registros anteriores de `termsVersion` correspondem à declaração apresentada na época: publicar novos documentos não demonstra aceite retroativo, e esta entrega não altera esses registros nem a configuração da API. Uma nova exigência contratual deve coordenar texto, `TERMS_VERSION` e eventual novo aceite.
