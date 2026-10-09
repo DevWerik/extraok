@@ -17,6 +17,50 @@ test('monitor repete falha transitória e usa a segunda resposta válida', async
   let calls = 0
   const result = await monitor({ targets: [target], retryMs: 0, fetcher: async () => { calls++; return calls === 1 ? new Response('', { status: 503 }) : Response.json({ status: 'ready' }) } })
   assert.equal(calls, 2); assert.equal(result.ok, true)
+  assert.equal(result.recoveredAfterRetry, true)
+  assert.equal(result.attemptHistory.length, 2)
+  assert.equal(result.attemptHistory[0].checks[0].ok, false)
+  assert.equal(result.attemptHistory[1].checks[0].ok, true)
+})
+
+test('monitor permite recuperação na quarta tentativa e preserva os timeouts anteriores', async () => {
+  let calls = 0
+  const result = await monitor({ targets: [target], retryMs: 0, fetcher: async () => {
+    calls++
+    if (calls < 4) throw new DOMException('synthetic timeout', 'TimeoutError')
+    return Response.json({ status: 'ready' })
+  } })
+  assert.equal(calls, 4)
+  assert.equal(result.ok, true)
+  assert.equal(result.recoveredAfterRetry, true)
+  assert.equal(result.attemptHistory.length, 4)
+  assert.equal(result.attemptHistory.slice(0, 3).every(a => a.checks[0].ok === false), true)
+  assert.equal(result.checks[0].ok, true)
+})
+
+test('monitor encerra falha persistente após quatro tentativas e não marca recuperação', async () => {
+  let calls = 0
+  const result = await monitor({ targets: [target], retryMs: 0, fetcher: async () => {
+    calls++
+    return new Response('', { status: 503 })
+  } })
+  assert.equal(calls, 4)
+  assert.equal(result.ok, false)
+  assert.equal(result.recoveredAfterRetry, false)
+  assert.equal(result.attemptHistory.length, 4)
+  assert.equal(result.checks[0].reason, 'HTTP 503')
+})
+
+test('monitor encerra na primeira tentativa quando todos os serviços estão saudáveis', async () => {
+  let calls = 0
+  const result = await monitor({ targets: [target], retryMs: 0, fetcher: async () => {
+    calls++
+    return Response.json({ status: 'ready' })
+  } })
+  assert.equal(calls, 1)
+  assert.equal(result.ok, true)
+  assert.equal(result.recoveredAfterRetry, false)
+  assert.equal(result.attemptHistory.length, 1)
 })
 test('alerta exige configuração, rejeita injeção de header e envia somente resumo técnico', async () => {
   const report = { id: 'test', checkedAt: '2026-10-09T12:00:00Z', checks: [{ name: 'Banco', ok: false, reason: 'HTTP 503' }] }

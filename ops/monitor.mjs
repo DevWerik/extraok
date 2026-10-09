@@ -47,14 +47,20 @@ export async function notify(report, env = process.env, fetcher = fetch) {
   return 'accepted-by-provider'
 }
 
-export async function monitor({ targets = defaultTargets, attempts = 2, retryMs = 5000, fetcher = fetch } = {}) {
+export async function monitor({ targets = defaultTargets, attempts = 4, retryMs = 5000, fetcher = fetch } = {}) {
+  // Four bounded attempts allow ~115s for the configured Render Free instance to start.
+  // Preserve every attempt so recovery does not erase timeouts or other failures.
+  const startedAt = new Date().toISOString()
+  const attemptHistory = []
   let checks
   for (let attempt = 1; attempt <= attempts; attempt++) {
     checks = await Promise.all(targets.map(t => checkTarget(t, { fetcher })))
+    attemptHistory.push({ attempt, checkedAt: new Date().toISOString(), checks })
     if (checks.every(c => c.ok) || attempt === attempts) break
     await delay(retryMs)
   }
-  return { id: `${Date.now()}-${process.pid}`, checkedAt: new Date().toISOString(), ok: checks.every(c => c.ok), checks }
+  const ok = checks.every(c => c.ok)
+  return { id: `${Date.now()}-${process.pid}`, startedAt, checkedAt: new Date().toISOString(), ok, recoveredAfterRetry: ok && attemptHistory.length > 1, checks, attemptHistory }
 }
 
 async function main() {

@@ -79,7 +79,8 @@ No GitHub, `OPS_ALERT_FROM` aceita somente o endereço, sem o nome de exibição
 
 ## 4. Automação preparada, ainda não ativada
 
-- `.github/workflows/availability.yml`: programação a cada 15 minutos, duas tentativas, checagem do HTML/JSON e alerta em falha.
+- `.github/workflows/availability.yml`: programação a cada 15 minutos, até quatro tentativas com timeout de 25 segundos por endpoint e intervalo de cinco segundos (janela aproximada de 115 segundos), checagem do HTML/JSON e alerta se a falha persistir. Interrompe as tentativas ao obter todas as respostas válidas; preserva cada resultado em `attemptHistory` e indica recuperação em `recoveredAfterRetry`.
+- O operador confirmou que a API usa Render Free. Esse plano suspende o serviço após 15 minutos sem tráfego e pode levar cerca de um minuto para iniciá-lo. A janela do monitor acomoda essa inicialização, mas não elimina a demora percebida pelos usuários nem garante recuperação. Timeouts isolados não comprovam que essa foi a causa: consulte os logs do Render no mesmo horário. [Comportamento do Render Free](https://render.com/docs/free#spinning-down-on-idle).
 - `.github/workflows/database-backup.yml`: programação diária às 04:17 UTC (01:17 em Brasília), dump criptografado, restauração isolada e retenção dos artefatos criptografados por 14 dias.
 - Ambos estão desativados para execuções agendadas até definir `OPS_MONITOR_ENABLED=true` / `OPS_BACKUP_ENABLED=true` em **GitHub → Settings → Secrets and variables → Actions → Variables**. O disparo manual executa mesmo sem essas flags.
 - Para ativar, publique os workflows na branch padrão, cadastre `BACKUP_DATABASE_URL`, `BACKUP_ENCRYPTION_KEY` e `OPS_RESEND_API_KEY` em **Secrets**, e `OPS_ALERT_FROM` / `OPS_ALERT_TO` em **Variables**. Faça uma execução manual, baixe o arquivo criptografado, teste uma restauração com sua chave preservada e confirme o recebimento do alerta. Só então habilite os agendamentos.
