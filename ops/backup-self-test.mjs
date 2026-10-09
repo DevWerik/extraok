@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { randomBytes } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { disposablePostgres, databaseSummary, saveBackup, readEncryptedBackup, decryptBackup, run } from './lib.mjs'
+import { disposablePostgres, databaseSummary, saveBackup, readEncryptedBackup, decryptBackup, run, postgresImage } from './lib.mjs'
 
 const key = randomBytes(32), report = { startedAt: new Date().toISOString(), mode: 'Somente dados sintéticos; não comprova retenção/backup do Neon de produção.', checks: [], cleanup: false }
 let source, target
@@ -10,6 +10,11 @@ const directory = resolve('.ops-state/backup-self-test')
 await mkdir(directory, { recursive: true, mode: 0o700 })
 try {
   source = await disposablePostgres()
+  report.image = postgresImage
+  report.postgresVersion = await source.sql('SHOW server_version;')
+  assert.equal(report.postgresVersion.startsWith('18.'), true)
+  assert.equal(await source.sql('SHOW data_directory;'), '/var/lib/postgresql/18/docker')
+  report.checks.push('PostgreSQL 18 executando no diretório protegido por tmpfs')
   const env = { DATABASE_URL: source.url, TEST_DATABASE_URL: source.url }
   const args = process.platform === 'win32' ? ['/d', '/s', '/c', 'pnpm.cmd --filter @extraok/api prisma:migrate:deploy'] : ['--filter', '@extraok/api', 'prisma:migrate:deploy']
   await run(process.platform === 'win32' ? 'cmd.exe' : 'pnpm', args, { env })
@@ -34,6 +39,7 @@ try {
   assert.throws(() => decryptBackup(tampered, key), /adulterado|incorreta/)
   report.checks.push('Backup criptografado; chave errada e adulteração recusadas antes do restore')
   target = await disposablePostgres()
+  assert.equal(await target.sql('SHOW data_directory;'), '/var/lib/postgresql/18/docker')
   await target.restore(await readEncryptedBackup(backup.file, key))
   const after = await databaseSummary(target, { fingerprint: true })
   assert.deepEqual(after, before)

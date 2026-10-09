@@ -4,7 +4,9 @@ import { readFile, writeFile, mkdir, stat } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 
-export const postgresImage = 'postgres:17.10-alpine3.22'
+export const postgresImage = 'postgres:18.6-alpine3.24'
+const postgresMount = '/var/lib/postgresql'
+const postgresDataDirectory = `${postgresMount}/18/docker`
 const magic = Buffer.from('EXTRAOK_BACKUP_V1\n')
 const maxBytes = 512 * 1024 * 1024
 export function encryptionKey(value) {
@@ -58,7 +60,7 @@ export function run(bin, args, { env = {}, input, maxOutput = maxBytes } = {}) {
 export async function disposablePostgres() {
   const id = randomBytes(8).toString('hex'), name = `extraok-restore-${id}`, password = randomBytes(32).toString('hex')
   const env = { POSTGRES_USER: 'audit', POSTGRES_DB: 'restore', POSTGRES_PASSWORD: password }
-  await run('docker', ['run', '--detach', '--rm', '--name', name, '--label', `extraok.restore-drill=${id}`, '--publish', '127.0.0.1::5432', '--tmpfs', '/var/lib/postgresql/data:rw', '--env', 'POSTGRES_USER', '--env', 'POSTGRES_DB', '--env', 'POSTGRES_PASSWORD', postgresImage], { env })
+  await run('docker', ['run', '--detach', '--rm', '--name', name, '--label', `extraok.restore-drill=${id}`, '--publish', '127.0.0.1::5432', '--tmpfs', `${postgresMount}:rw`, '--env', 'POSTGRES_USER', '--env', 'POSTGRES_DB', '--env', 'POSTGRES_PASSWORD', postgresImage], { env })
   async function inspect() {
     const value = JSON.parse((await run('docker', ['inspect', name])).toString())[0]
     if (value.Name !== '/' + name || value.Config.Labels['extraok.restore-drill'] !== id) throw new Error('Container não pertence a este teste.')
@@ -68,6 +70,7 @@ export async function disposablePostgres() {
   try {
     const value = await inspect(), binding = value.NetworkSettings.Ports['5432/tcp'][0]
     if (binding.HostIp !== '127.0.0.1') throw new Error('Porta de banco fora do loopback.')
+    if (!Object.hasOwn(value.HostConfig.Tmpfs ?? {}, postgresMount) || !value.Config.Env.includes(`PGDATA=${postgresDataDirectory}`)) throw new Error('Diretório de dados do PostgreSQL fora do tmpfs esperado.')
     for (let n = 0; n < 40; n++) {
       try { await run('docker', ['exec', name, 'pg_isready', '-U', 'audit', '-d', 'restore']); break }
       catch (error) { if (n === 39) throw error; await delay(500) }
