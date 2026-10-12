@@ -1,5 +1,5 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Controller, useForm } from 'react-hook-form'
+import { Controller, useForm, useWatch } from 'react-hook-form'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -30,6 +30,8 @@ export function JobForm({ formId, disabled = false, onSubmit }: JobFormProps) {
     resolver: zodResolver(jobSchema),
     defaultValues: { clientId: '', title: '', description: '', scheduledAt: '' },
   })
+  const description = useWatch({ control, name: 'description' }) ?? ''
+  const descriptionMaxLength = jobSchema.shape.description.maxLength ?? undefined
 
   return (
     <form id={formId} className="space-y-5" onSubmit={handleSubmit(onSubmit)} noValidate>
@@ -60,10 +62,12 @@ export function JobForm({ formId, disabled = false, onSubmit }: JobFormProps) {
           id={`${formId}-title`}
           placeholder="Ex.: Manutenção preventiva do ar-condicionado"
           aria-invalid={Boolean(errors.title)}
+          aria-describedby={`${formId}-title-help${errors.title ? ` ${formId}-title-error` : ''}`}
           disabled={disabled}
           {...register('title')}
         />
-        {errors.title && <p className="text-xs font-medium text-destructive">{errors.title.message}</p>}
+        <p id={`${formId}-title-help`} className="text-xs text-muted-foreground">Máximo de 160 caracteres.</p>
+        {errors.title && <p id={`${formId}-title-error`} className="text-xs font-medium text-destructive">{errors.title.message}</p>}
       </div>
 
       <div className="space-y-2">
@@ -71,12 +75,18 @@ export function JobForm({ formId, disabled = false, onSubmit }: JobFormProps) {
         <Textarea
           id={`${formId}-description`}
           rows={4}
+          maxLength={descriptionMaxLength}
           placeholder="Explique o que será realizado no atendimento."
           aria-invalid={Boolean(errors.description)}
+          aria-describedby={`${formId}-description-help${errors.description ? ` ${formId}-description-error` : ''}`}
           disabled={disabled}
           {...register('description')}
         />
-        {errors.description && <p className="text-xs font-medium text-destructive">{errors.description.message}</p>}
+        <p id={`${formId}-description-help`} className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+          <span>Máximo de {descriptionMaxLength?.toLocaleString('pt-BR')} caracteres.</span>
+          <span className="tabular-nums">{description.length.toLocaleString('pt-BR')} / {descriptionMaxLength?.toLocaleString('pt-BR')} caracteres</span>
+        </p>
+        {errors.description && <p id={`${formId}-description-error`} className="text-xs font-medium text-destructive">{errors.description.message}</p>}
       </div>
 
       <div className="space-y-2">

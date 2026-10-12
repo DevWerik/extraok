@@ -1,4 +1,4 @@
-import { Check, Sparkles } from 'lucide-react'
+import { Check, Sparkles, Tag } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card'
@@ -23,7 +23,7 @@ export function PlanCards({ plans, action }: { plans: Plan[]; action: (plan: Pla
               {plan.id === 'pro' && <Badge className="border-success/20 bg-success-soft text-success"><Sparkles className="size-3" aria-hidden="true" />Recomendado</Badge>}
             </div>
             <p className="min-h-15 text-sm leading-relaxed text-muted-foreground">{descriptions[plan.id]}</p>
-            <p className="mt-3 text-3xl font-extrabold tracking-tight text-primary">{formatCurrency(plan.priceCents)}</p>
+            <PlanPrice plan={plan} />
             <p className="text-xs text-muted-foreground">{plan.durationDays ? `por ${plan.durationDays} dias · pagamento via Pix` : 'sem pagamento · limite mensal'}</p>
           </CardHeader>
           <CardContent className="flex-1">
@@ -34,6 +34,27 @@ export function PlanCards({ plans, action }: { plans: Plan[]; action: (plan: Pla
           <CardFooter>{action(plan)}</CardFooter>
         </Card>
       ))}
+    </div>
+  )
+}
+
+function PlanPrice({ plan }: { plan: Plan }) {
+  const originalPrice = plan.compareAtPriceCents
+  const hasPromotion = plan.priceCents > 0 && originalPrice != null && originalPrice > plan.priceCents
+
+  return (
+    <div className="mt-3 flex flex-col items-start gap-2">
+      {hasPromotion && (
+        <>
+          <Badge variant="success"><Tag className="size-3" aria-hidden="true" />Oferta especial</Badge>
+          <p className="text-sm text-muted-foreground">De <s>{formatCurrency(originalPrice)}</s></p>
+        </>
+      )}
+      <p className="flex flex-wrap items-baseline gap-x-2 text-3xl font-extrabold tracking-tight text-primary">
+        {hasPromotion && <span className="text-sm font-medium tracking-normal text-muted-foreground">por</span>}
+        {formatCurrency(plan.priceCents)}
+      </p>
+      {hasPromotion && <p className="text-sm font-semibold text-success">Economize {formatCurrency(originalPrice - plan.priceCents)} no plano</p>}
     </div>
   )
 }

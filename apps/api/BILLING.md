@@ -16,6 +16,8 @@ O prestador paga pelo uso do ExtraOK. O pagamento dos serviços extras entre pre
 
 O catálogo oficial da aplicação está em `src/modules/billing/plans.ts`; a interface consulta a API, sem manter outra tabela de preços.
 
+Os cards exibem a oferta Pro de R$ 19,99 por R$ 9,99 e Negócio de R$ 29,99 por R$ 19,99. O campo `compareAtPriceCents` informa o preço de referência para a promoção; `priceCents` continua sendo o valor cobrado. O Gratuito não tem preço de referência. A promoção aparece somente quando o preço de referência é maior que o preço cobrado.
+
 Os preços do catálogo valem para novas cobranças. Cobranças já geradas, inclusive Pix pendentes reutilizados, mantêm o valor registrado na criação; a confirmação e o histórico usam esse mesmo valor. Períodos já comprados preservam seus limites e datas.
 
 ## Benefícios por assinatura

@@ -2,8 +2,8 @@ import { z } from 'zod'
 import { parseCurrencyInputToCents } from '@/lib/currency'
 
 export const extraSchema = z.object({
-  title: z.string().trim().min(3, 'Informe um título com pelo menos 3 caracteres.'),
-  description: z.string().trim().min(8, 'Descreva o benefício deste serviço.'),
+  title: z.string().trim().min(3, 'Informe um título com pelo menos 3 caracteres.').max(160, 'O título deve ter no máximo 160 caracteres.'),
+  description: z.string().trim().min(8, 'Descreva o benefício deste serviço.').max(2_000, 'A descrição deve ter no máximo 2.000 caracteres.'),
   price: z.string().trim().refine((value) => {
     const cents = parseCurrencyInputToCents(value)
     return cents !== null && cents > 0

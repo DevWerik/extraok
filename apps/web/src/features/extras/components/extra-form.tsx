@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useEffect } from 'react'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
@@ -18,6 +18,7 @@ const emptyValues: ExtraFormValues = { title: '', description: '', price: '' }
 export function ExtraForm({ formId, initialValues, disabled = false, onSubmit }: ExtraFormProps) {
   const {
     register,
+    control,
     reset,
     handleSubmit,
     formState: { errors },
@@ -25,6 +26,8 @@ export function ExtraForm({ formId, initialValues, disabled = false, onSubmit }:
     resolver: zodResolver(extraSchema),
     defaultValues: initialValues ?? emptyValues,
   })
+  const description = useWatch({ control, name: 'description' }) ?? ''
+  const descriptionMaxLength = extraSchema.shape.description.maxLength ?? undefined
 
   useEffect(() => {
     reset(initialValues ?? emptyValues)
@@ -34,13 +37,18 @@ export function ExtraForm({ formId, initialValues, disabled = false, onSubmit }:
     <form id={formId} className="space-y-4" onSubmit={handleSubmit(onSubmit)} noValidate>
       <div className="space-y-2">
         <Label htmlFor={`${formId}-title`}>Título do extra</Label>
-        <Input id={`${formId}-title`} placeholder="Ex.: Higienização completa" aria-invalid={Boolean(errors.title)} disabled={disabled} {...register('title')} />
-        {errors.title && <p className="text-xs font-medium text-destructive">{errors.title.message}</p>}
+        <Input id={`${formId}-title`} placeholder="Ex.: Higienização completa" aria-invalid={Boolean(errors.title)} aria-describedby={`${formId}-title-help${errors.title ? ` ${formId}-title-error` : ''}`} disabled={disabled} {...register('title')} />
+        <p id={`${formId}-title-help`} className="text-xs text-muted-foreground">Máximo de 160 caracteres.</p>
+        {errors.title && <p id={`${formId}-title-error`} className="text-xs font-medium text-destructive">{errors.title.message}</p>}
       </div>
       <div className="space-y-2">
         <Label htmlFor={`${formId}-description`}>Descrição</Label>
-        <Textarea id={`${formId}-description`} rows={4} placeholder="Explique com clareza o que será feito e o benefício para o cliente." aria-invalid={Boolean(errors.description)} disabled={disabled} {...register('description')} />
-        {errors.description && <p className="text-xs font-medium text-destructive">{errors.description.message}</p>}
+        <Textarea id={`${formId}-description`} rows={4} maxLength={descriptionMaxLength} placeholder="Explique com clareza o que será feito e o benefício para o cliente." aria-invalid={Boolean(errors.description)} aria-describedby={`${formId}-description-help${errors.description ? ` ${formId}-description-error` : ''}`} disabled={disabled} {...register('description')} />
+        <p id={`${formId}-description-help`} className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+          <span>Máximo de {descriptionMaxLength?.toLocaleString('pt-BR')} caracteres.</span>
+          <span className="tabular-nums">{description.length.toLocaleString('pt-BR')} / {descriptionMaxLength?.toLocaleString('pt-BR')} caracteres</span>
+        </p>
+        {errors.description && <p id={`${formId}-description-error`} className="text-xs font-medium text-destructive">{errors.description.message}</p>}
       </div>
       <div className="space-y-2">
         <Label htmlFor={`${formId}-price`}>Valor</Label>

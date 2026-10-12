@@ -9,6 +9,7 @@ export interface Plan {
   id: PlanId
   name: string
   priceCents: number
+  compareAtPriceCents?: number | null
   jobLimit: number
   durationDays: number | null
   features: PlanFeatures
