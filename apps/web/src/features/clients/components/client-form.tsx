@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useEffect } from 'react'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
@@ -31,6 +31,7 @@ export function ClientForm({
 }: ClientFormProps) {
   const {
     register,
+    control,
     handleSubmit,
     reset,
     formState: { errors },
@@ -38,6 +39,8 @@ export function ClientForm({
     resolver: zodResolver(clientSchema),
     defaultValues: initialValues ?? emptyValues,
   })
+  const notes = useWatch({ control, name: 'notes' }) ?? ''
+  const notesMaxLength = clientSchema.shape.notes.maxLength ?? undefined
 
   useEffect(() => {
     reset(initialValues ?? emptyValues)
@@ -85,11 +88,17 @@ export function ClientForm({
         <Textarea
           id={`${formId}-notes`}
           rows={4}
+          maxLength={notesMaxLength}
           placeholder="Preferências de horário, acesso ao local ou outros detalhes úteis."
           aria-invalid={Boolean(errors.notes)}
+          aria-describedby={`${formId}-notes-help${errors.notes ? ` ${formId}-notes-error` : ''}`}
           disabled={disabled}
           {...register('notes')}
         />
+        <p id={`${formId}-notes-help`} className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+          <span>Máximo de {notesMaxLength?.toLocaleString('pt-BR')} caracteres.</span>
+          <span className="tabular-nums">{notes.length.toLocaleString('pt-BR')} / {notesMaxLength?.toLocaleString('pt-BR')} caracteres</span>
+        </p>
       </FormField>
     </form>
   )
@@ -107,7 +116,7 @@ function FormField({ label, htmlFor, error, children }: FormFieldProps) {
     <div className="space-y-2">
       <Label htmlFor={htmlFor}>{label}</Label>
       {children}
-      {error && <p className="text-xs font-medium text-destructive">{error}</p>}
+      {error && <p id={`${htmlFor}-error`} className="text-xs font-medium text-destructive">{error}</p>}
     </div>
   )
 }
