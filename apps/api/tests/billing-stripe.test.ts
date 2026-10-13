@@ -136,19 +136,29 @@ async function fixture(context: TestContext) {
   let remote = stripeSession();
   let creates = 0;
   let reads = 0;
+  let cancellations = 0;
+  let cancellationMode: "success" | "paid" | "timeout" | "timeout_after_cancel" = "success";
   const prisma = {
     $queryRaw: async () => [],
     billingPayment: {
       findUnique: async ({ where }: { where: { id: string } }) => payments.get(where.id) ?? null,
       findUniqueOrThrow: async ({ where }: { where: { id: string } }) => payments.get(where.id)!,
-      findFirst: async ({ where }: { where: { id?: string; ownerId?: string; status?: unknown } }) => where.id
-        ? [...payments.values()].find((p) => p.id === where.id && p.ownerId === where.ownerId) ?? null : null,
+      findFirst: async ({ where }: { where: { id?: string; ownerId?: string; status?: string | { in: string[] } } }) =>
+        [...payments.values()].find((p) => (!where.id || p.id === where.id) && (!where.ownerId || p.ownerId === where.ownerId) &&
+          (!where.status || (typeof where.status === "string" ? p.status === where.status : where.status.in.includes(p.status)))) ?? null,
       updateMany: async () => ({ count: 0 }),
       create: async ({ data }: { data: Partial<BillingPayment> & { id: string } }) => {
         const payment = { providerId: null, checkoutUrl: null, providerUpdatedAt: null, approvedAt: null,
           rejectedAt: null, rejectionReason: null, qrCode: null, qrCodeBase64: null, lastCheckedAt: null,
           ...data, status: "creating" as const, updatedAt: new Date() } as BillingPayment;
-        payments.set(data.id, payment); remote = stripeSession(data.id); return payment;
+        payments.set(data.id, payment);
+        remote = stripeSession(data.id);
+        remote.amount_total = payment.priceCents;
+        if (data.id !== reference) {
+          remote.id = `cs_test_${data.id.replaceAll("-", "")}`;
+          remote.url = `https://checkout.stripe.com/c/pay/${remote.id}`;
+        }
+        return payment;
       },
       update: async ({ where, data }: { where: { id: string }; data: Partial<BillingPayment> }) => {
         const saved = { ...payments.get(where.id)!, ...data }; payments.set(where.id, saved); return saved;
@@ -166,8 +176,21 @@ async function fixture(context: TestContext) {
     $transaction: async (callback: (tx: unknown) => unknown): Promise<unknown> => callback(prisma),
   };
   const gateway = createStripeGateway(env, async (url, options) => {
-    if (new URL(String(url)).pathname === "/v1/account") return Response.json({ id: env.STRIPE_ACCOUNT_ID, country: "BR", charges_enabled: true });
-    if (options?.method === "POST") { creates++; return Response.json({ id: sessionId }); }
+    const path = new URL(String(url)).pathname;
+    if (path === "/v1/account") return Response.json({ id: env.STRIPE_ACCOUNT_ID, country: "BR", charges_enabled: true });
+    if (path.endsWith("/expire")) {
+      assert.equal(path, `/v1/checkout/sessions/${remote.id}/expire`);
+      assert.equal(options?.method, "POST");
+      assert.equal(new Headers(options?.headers).get("Idempotency-Key"), `cancel-${remote.id}`);
+      cancellations++;
+      if (cancellationMode === "paid") remote = paidSession(remote.client_reference_id);
+      if (cancellationMode === "timeout") throw new Error("private-provider-details");
+      if (remote.status !== "open") return Response.json({ error: "not_open" }, { status: 400 });
+      remote.status = "expired";
+      if (cancellationMode === "timeout_after_cancel") throw new Error("private-provider-details");
+      return Response.json(remote);
+    }
+    if (options?.method === "POST") { creates++; return Response.json({ id: remote.id }); }
     reads++; return Response.json(remote);
   });
   const app = await buildApp({ env, prisma: prisma as unknown as PrismaClient, pixGateway: gateway, logger: false, billingReconciliationEnabled: false });
@@ -177,8 +200,109 @@ async function fixture(context: TestContext) {
     const payload = JSON.stringify({ id: "evt_123456789", type, livemode: false, data: { object } }, null, 2);
     return app.inject({ method: "POST", url: "/api/v1/billing/webhooks/stripe", payload, headers: { "content-type": "application/json", "stripe-signature": signature(payload) } });
   }
-  return { app, headers, payments, periods, webhook, user, setRemote: (value: ReturnType<typeof stripeSession>) => { remote = value; }, counts: () => ({ creates, reads }) };
+  return { app, headers, payments, periods, webhook, user,
+    setRemote: (value: ReturnType<typeof stripeSession>) => { remote = value; },
+    setCancellationMode: (value: typeof cancellationMode) => { cancellationMode = value; },
+    counts: () => ({ creates, reads, cancellations }) };
 }
+
+test("Stripe cancellation expires checkout, stays idempotent and lets the owner choose another plan", async (context) => {
+  const f = await fixture(context);
+  const created = await f.app.inject({ method: "POST", url: "/api/v1/billing/payments", headers: f.headers, payload: { planId: "pro", idempotencyKey: reference } });
+  assert.equal(created.statusCode, 201);
+  const cancel = () => f.app.inject({ method: "POST", url: `/api/v1/billing/payments/${reference}/cancel`, headers: f.headers });
+  const cancelled = await cancel();
+  assert.equal(cancelled.statusCode, 200, cancelled.body);
+  assert.equal(cancelled.json().status, "cancelled");
+  assert.equal(cancelled.json().checkoutUrl, null);
+  assert.equal(cancelled.json().qrCode, null);
+  assert.equal(f.periods.size, 0);
+  assert.equal((await cancel()).json().status, "cancelled");
+  assert.equal(f.counts().cancellations, 1);
+  assert.equal((await f.webhook("checkout.session.expired")).statusCode, 200);
+  assert.equal(f.payments.get(reference)!.status, "cancelled", "expiry webhook preserves the explicit cancellation");
+  const next = await f.app.inject({ method: "POST", url: "/api/v1/billing/payments", headers: f.headers, payload: { planId: "business", idempotencyKey: randomUUID() } });
+  assert.equal(next.statusCode, 201, next.body);
+  assert.equal(next.json().planId, "business");
+  assert.equal(next.json().priceCents, 1999);
+  assert.equal(next.json().status, "pending");
+  assert.equal(f.counts().creates, 2);
+});
+
+test("cancellation requires session, Origin, valid ID and ownership before provider calls", async (context) => {
+  const f = await fixture(context);
+  await f.app.inject({ method: "POST", url: "/api/v1/billing/payments", headers: f.headers, payload: { planId: "pro", idempotencyKey: reference } });
+  const before = f.counts();
+  const url = `/api/v1/billing/payments/${reference}/cancel`;
+  assert.equal((await f.app.inject({ method: "POST", url, headers: { origin } })).statusCode, 401);
+  assert.equal((await f.app.inject({ method: "POST", url, headers: { cookie: f.headers.cookie } })).statusCode, 403);
+  assert.equal((await f.app.inject({ method: "POST", url: "/api/v1/billing/payments/not-an-id/cancel", headers: f.headers })).statusCode, 400);
+  assert.equal((await f.app.inject({ method: "POST", url: `/api/v1/billing/payments/${randomUUID()}/cancel`, headers: f.headers })).statusCode, 404);
+  f.payments.get(reference)!.ownerId = randomUUID();
+  assert.equal((await f.app.inject({ method: "POST", url, headers: f.headers })).statusCode, 404);
+  assert.deepEqual(f.counts(), before);
+});
+
+for (const timing of ["before", "during"] as const) {
+test(`a payment confirmed ${timing} cancellation grants exactly one period and is never cancelled`, async (context) => {
+  const f = await fixture(context);
+  await f.app.inject({ method: "POST", url: "/api/v1/billing/payments", headers: f.headers, payload: { planId: "pro", idempotencyKey: reference } });
+  if (timing === "before") f.setRemote(paidSession());
+  else f.setCancellationMode("paid");
+  const result = await f.app.inject({ method: "POST", url: `/api/v1/billing/payments/${reference}/cancel`, headers: f.headers });
+  assert.equal(result.statusCode, 200, result.body);
+  assert.equal(result.json().status, "approved");
+  assert.equal(f.counts().cancellations, timing === "before" ? 0 : 1);
+  await f.webhook();
+  assert.equal(f.periods.size, 1);
+  const stale = stripeSession(); stale.status = "expired"; f.setRemote(stale);
+  await f.webhook("checkout.session.expired");
+  assert.equal(f.payments.get(reference)!.status, "approved");
+  assert.equal(f.periods.size, 1);
+});
+}
+
+test("lost cancellation response is recovered by an authenticated provider read", async (context) => {
+  const f = await fixture(context);
+  await f.app.inject({ method: "POST", url: "/api/v1/billing/payments", headers: f.headers, payload: { planId: "pro", idempotencyKey: reference } });
+  f.setCancellationMode("timeout_after_cancel");
+  const result = await f.app.inject({ method: "POST", url: `/api/v1/billing/payments/${reference}/cancel`, headers: f.headers });
+  assert.equal(result.statusCode, 200, result.body);
+  assert.equal(result.json().status, "cancelled");
+});
+
+for (const failure of ["timeout", "complete_unpaid"] as const) {
+test(`unconfirmed cancellation (${failure}) keeps the pending payment and blocks another plan`, async (context) => {
+  const f = await fixture(context);
+  await f.app.inject({ method: "POST", url: "/api/v1/billing/payments", headers: f.headers, payload: { planId: "pro", idempotencyKey: reference } });
+  if (failure === "timeout") f.setCancellationMode("timeout");
+  else { const remote = stripeSession(); remote.status = "complete"; f.setRemote(remote); }
+  const result = await f.app.inject({ method: "POST", url: `/api/v1/billing/payments/${reference}/cancel`, headers: f.headers });
+  assert.equal(result.statusCode, 503, result.body);
+  assert.doesNotMatch(result.body, /private-provider-details/);
+  assert.equal(f.payments.get(reference)!.status, "pending");
+  assert.equal(f.periods.size, 0);
+  const next = await f.app.inject({ method: "POST", url: "/api/v1/billing/payments", headers: f.headers, payload: { planId: "business", idempotencyKey: randomUUID() } });
+  assert.equal(next.statusCode, 409);
+  assert.equal(f.counts().creates, 1);
+});
+}
+
+test("cancellation rejects an unverified amount and never abandons an in-flight creation locally", async (context) => {
+  const f = await fixture(context);
+  await f.app.inject({ method: "POST", url: "/api/v1/billing/payments", headers: f.headers, payload: { planId: "pro", idempotencyKey: reference } });
+  const remote = stripeSession(); remote.amount_total = 1; f.setRemote(remote);
+  const url = `/api/v1/billing/payments/${reference}/cancel`;
+  const mismatch = await f.app.inject({ method: "POST", url, headers: f.headers });
+  assert.equal(mismatch.statusCode, 409);
+  assert.equal(mismatch.json().error.code, "PAYMENT_MISMATCH");
+  f.payments.get(reference)!.providerId = null;
+  f.payments.get(reference)!.status = "creating";
+  const preparing = await f.app.inject({ method: "POST", url, headers: f.headers });
+  assert.equal(preparing.statusCode, 409);
+  assert.equal(f.payments.get(reference)!.status, "creating");
+  assert.equal(f.counts().cancellations, 0);
+});
 
 test("Stripe HTTP checkout, signed confirmation, duplicate delivery, ownership and partial refund", async (context) => {
   const f = await fixture(context);

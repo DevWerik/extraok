@@ -17,6 +17,10 @@ export function currentPayment(queried: BillingPayment | undefined, summary: Bil
   if (queried.status === 'refunded') return queried
   if (summary.status === 'approved') return summary
   if (queried.status === 'approved') return queried
+  // Stripe cancellation is represented as expiration upstream. A cached expiry
+  // must not hide an explicit cancellation already confirmed by our API.
+  if (summary.status === 'cancelled') return summary
+  if (queried.status === 'cancelled') return queried
   if (['creating', 'pending'].includes(queried.status) && !['creating', 'pending'].includes(summary.status)) return summary
   return queried
 }

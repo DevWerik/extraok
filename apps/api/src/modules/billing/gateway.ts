@@ -10,5 +10,6 @@ export function createBillingGateway(env: Env, transport: typeof fetch = fetch):
   return {
     create: (payment) => (payment.providerApi === "stripe" ? stripe : mercadoPago).create(payment),
     get: (id) => (stripeSessionIdPattern.test(id) ? stripe : mercadoPago).get(id),
+    cancel: (id) => (stripeSessionIdPattern.test(id) ? stripe : mercadoPago).cancel!(id),
   };
 }

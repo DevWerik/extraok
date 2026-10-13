@@ -14,4 +14,7 @@ export const billingService = {
   payment(id: string, signal?: AbortSignal) {
     return apiRequest<BillingPayment>(`/billing/payments/${apiPath(id)}`, { signal })
   },
+  cancelPayment(id: string) {
+    return apiRequest<BillingPayment>(`/billing/payments/${apiPath(id)}/cancel`, { method: 'POST' })
+  },
 }

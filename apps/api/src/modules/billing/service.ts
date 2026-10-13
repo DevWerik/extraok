@@ -83,12 +83,15 @@ export async function applyVerifiedPayment(app: FastifyInstance, remote: PixPaym
   const cents = remote.transaction_amount * 100;
   const stripe = remote.providerApi === "stripe";
   const awaitingTransaction = orderIdPattern.test(remote.id) && remote.status === "processing" && remote.payment_method_id === null;
+  // An authenticated canceled Order can have no Pix transaction yet. Its mode
+  // must still be known and match; this exception can never approve a payment.
+  const cancelledBeforeTransaction = orderIdPattern.test(remote.id) && remote.status === "cancelled" && remote.payment_method_id === null;
   if ((expectedId && payment.id !== expectedId) ||
     payment.providerApi !== (stripe ? "stripe" : orderIdPattern.test(remote.id) ? "orders" : "payments") ||
     (payment.providerId && payment.providerId !== remote.id) ||
     remote.collector_id !== (stripe ? app.env.STRIPE_ACCOUNT_ID : app.env.MERCADOPAGO_COLLECTOR_ID) ||
     (remote.live_mode !== (stripe ? app.env.STRIPE_LIVE_MODE : app.env.MERCADOPAGO_LIVE_MODE) && !(awaitingTransaction && remote.live_mode === null)) ||
-    (remote.payment_method_id !== "pix" && !awaitingTransaction) ||
+    (remote.payment_method_id !== "pix" && !awaitingTransaction && !cancelledBeforeTransaction) ||
     remote.currency_id !== "BRL" || Math.abs(cents - payment.priceCents) > 0.000001) {
     throw new AppError(409, "PAYMENT_MISMATCH", "A cobrança não corresponde ao plano solicitado. Entre em contato com o suporte.");
   }
@@ -101,7 +104,7 @@ export async function applyVerifiedPayment(app: FastifyInstance, remote: PixPaym
     const expired = new Date(remote.date_of_expiration ?? current.expiresAt).getTime() <= Date.now();
     const status = remoteStatus === "pending"
       ? (["expired", "cancelled", "rejected"].includes(current.status) ? current.status : expired ? "expired" : "pending")
-      : remoteStatus;
+      : current.status === "cancelled" && remoteStatus === "expired" ? "cancelled" : remoteStatus;
     if (current.providerId && current.providerId !== remote.id) throw new PixGatewayError();
     // Concurrent HTTP responses and out-of-order notifications must not regress state.
     if ((current.providerUpdatedAt && current.providerUpdatedAt > providerUpdatedAt) ||
@@ -158,6 +161,44 @@ export async function synchronizePayment(app: FastifyInstance, gateway: PixGatew
   return await applyVerifiedPayment(app, remote, payment.id) ?? payment;
 }
 
+export async function cancelPayment(app: FastifyInstance, gateway: PixGateway, ownerId: string, id: string) {
+  const payment = await app.prisma.billingPayment.findFirst({ where: { id, ownerId } });
+  if (!payment) throw notFound("Cobrança não encontrada.");
+  if (!["creating", "pending", "expired"].includes(payment.status)) return serializePayment(payment);
+  requireBilling(app);
+  if (!payment.providerId) {
+    if (payment.status === "expired") return serializePayment(payment);
+    // Creation may still be in flight: never release the attempt locally while
+    // an idempotent provider creation could complete and leave a payable charge.
+    throw conflict("O Pix ainda está sendo preparado. Aguarde a atualização para cancelar.");
+  }
+  const unavailable = () => new AppError(503, "PAYMENT_UNAVAILABLE",
+    "Não foi possível confirmar o cancelamento. Atualize o pagamento e tente novamente. Se já pagou, aguarde a confirmação.");
+  let remote: PixPayment;
+  try { remote = await gateway.get(payment.providerId); }
+  catch { throw unavailable(); }
+  // Check account, reference, amount, mode and current paid state before mutation.
+  const current = await applyVerifiedPayment(app, remote, payment.id);
+  if (!current) throw unavailable();
+  if (!["creating", "pending", "expired"].includes(current.status) || verifiedPaymentStatus(remote) !== "pending") {
+    return serializePayment(current);
+  }
+  if (!gateway.cancel) throw unavailable();
+  try { await gateway.cancel(payment.providerId); }
+  catch { /* A timeout/rejection can race with success or payment. Re-read below. */ }
+  try { remote = await gateway.get(payment.providerId); }
+  catch { throw unavailable(); }
+  // Stripe exposes explicit checkout cancellation as expiration. Keep a user
+  // cancellation labelled Cancelado, including later session.expired webhooks.
+  const confirmed = await applyVerifiedPayment(app,
+    remote.status === "cancelled" ? { ...remote, status_detail: "cancelled_by_user" } : remote, payment.id);
+  if (!confirmed || verifiedPaymentStatus(remote) === "pending") {
+    // Never unblock another plan while the provider still allows this payment.
+    throw unavailable();
+  }
+  return serializePayment(confirmed);
+}
+
 export async function createPayment(app: FastifyInstance, gateway: PixGateway, user: AuthUser,
   input: { planId: PaidPlan; cpf?: string; idempotencyKey: string; payerName?: string; deviceId?: string }) {
   requirePaymentPurchase(app, user.id);
@@ -177,7 +218,7 @@ export async function createPayment(app: FastifyInstance, gateway: PixGateway, u
     });
     const pending = await transaction.billingPayment.findFirst({ where: { ownerId: user.id, status: { in: ["creating", "pending"] } } });
     if (pending) {
-      if (pending.plan !== input.planId) throw conflict("Você já possui um Pix pendente. Conclua o pagamento ou aguarde a validade para escolher outro plano.");
+      if (pending.plan !== input.planId) throw conflict("Você já possui um Pix pendente. Cancele a cobrança, conclua o pagamento ou aguarde a validade para escolher outro plano.");
       return pending;
     }
     const recentRejection = await transaction.billingPayment.findFirst({

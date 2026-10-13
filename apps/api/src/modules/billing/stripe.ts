@@ -113,6 +113,13 @@ export function createStripeGateway(env: Env, transport: typeof fetch = fetch): 
   }
   return {
     get,
+    async cancel(id) {
+      if (!stripeSessionIdPattern.test(id)) throw new PixGatewayError();
+      await verifiedAccount();
+      // Checkout-owned PaymentIntents must be cancelled by expiring the session.
+      // The service re-reads it even on failure to detect payment/cancellation races.
+      await request(`/checkout/sessions/${id}/expire`, new URLSearchParams(), `cancel-${id}`);
+    },
     async create(payment) {
       if (payment.providerApi !== "stripe") throw new PixGatewayError();
       await verifiedAccount();

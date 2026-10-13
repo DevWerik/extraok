@@ -8,7 +8,7 @@ import { BILLING_PLANS, validCpf } from "./plans.js";
 import { validWebhookSignature, type PixGateway } from "./mercadopago.js";
 import { providerResourceIdPattern } from "./orders.js";
 import { deviceIdPattern, PaymentRetryLaterError } from "./payment-risk.js";
-import { applyVerifiedPayment, billingSummary, createPayment, reconcilePayments, requireBilling, requirePaymentPurchase, serializePayment, synchronizePayment } from "./service.js";
+import { applyVerifiedPayment, billingSummary, cancelPayment, createPayment, reconcilePayments, requireBilling, requirePaymentPurchase, serializePayment, synchronizePayment } from "./service.js";
 import { registerStripeWebhook } from "./stripe-webhook.js";
 
 const purchaseSchema = z.object({
@@ -41,6 +41,11 @@ export async function registerBillingRoutes(app: FastifyInstance, gateway: PixGa
       if (error instanceof PaymentRetryLaterError) reply.header("Retry-After", error.retryAfterSeconds);
       throw error;
     }
+  });
+  app.post("/billing/payments/:id/cancel", { preHandler: requireAuth, config: { rateLimit: { max: 10, timeWindow: "1 minute" } } }, async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    const { id } = parseWith(idSchema, request.params);
+    return cancelPayment(app, gateway, currentUser(request).id, id);
   });
   app.get("/billing/payments/:id", { preHandler: requireAuth, config: { rateLimit: { max: 30, timeWindow: "1 minute" } } }, async (request, reply) => {
     reply.header("Cache-Control", "no-store");

@@ -4,11 +4,11 @@ import test from "node:test";
 import { buildApp } from "../src/app.js";
 import { loadEnv } from "../src/config/env.js";
 import { createPrismaClient } from "../src/db/prisma.js";
-import type { BillingPayment } from "../src/generated/prisma/client.js";
+import type { BillingPayment, PrismaClient } from "../src/generated/prisma/client.js";
 import { hashToken } from "../src/lib/tokens.js";
 import { createPixGateway, validWebhookSignature } from "../src/modules/billing/mercadopago.js";
 import { normalizeOrder, normalizeOrderAccount } from "../src/modules/billing/orders.js";
-import { applyVerifiedPayment, reconcilePayments, synchronizePayment } from "../src/modules/billing/service.js";
+import { applyVerifiedPayment, cancelPayment, reconcilePayments, synchronizePayment } from "../src/modules/billing/service.js";
 
 const orderId = "ORD01HRYFWNYRE1MR1E60MW3X0T2P";
 const sandboxOrderId = "ORDTST01HRYFWNYRE1MR1E60MW3X0T2P";
@@ -266,6 +266,108 @@ test("Orders rejeita respostas ambíguas, pagamento incompleto, moeda e método 
   const awaiting = accredited();
   awaiting.transactions.payments[0].status = "action_required";
   assert.equal(normalizeOrder(awaiting).status, "pending");
+});
+
+test("Orders cancelada antes de gerar Pix exige modo e conta verificáveis", () => {
+  const remote = pixOrder();
+  remote.status = "canceled";
+  remote.status_detail = "canceled_transaction";
+  remote.transactions.payments = [];
+  const account = normalizeOrderAccount({ id: "123456", tags: ["test_user"], site_id: "MLB" });
+  assert.throws(() => normalizeOrder(remote));
+  const cancelled = normalizeOrder(remote, account);
+  assert.equal(cancelled.status, "cancelled");
+  assert.equal(cancelled.live_mode, false);
+  assert.equal(cancelled.payment_method_id, null);
+  assert.equal(cancelled.date_approved, null);
+  assert.throws(() => normalizeOrder(remote, { ...account, collectorId: "99999" }));
+  assert.throws(() => normalizeOrder({ ...remote, total_paid_amount: "9.99" }, account));
+  assert.throws(() => normalizeOrder({ ...remote, live_mode: true }, account));
+  remote.status = "processed";
+  remote.status_detail = "accredited";
+  assert.throws(() => normalizeOrder(remote, account), "missing transaction must never grant access");
+});
+
+for (const withPix of [true, false]) {
+for (const confirmed of [true, false]) {
+test(`Orders cancellation ${withPix ? "with Pix" : "before Pix creation"} ${confirmed ? "confirmed" : "unconfirmed"}`, async (context) => {
+  const id = randomUUID();
+  const ownerId = randomUUID();
+  const remote = pixOrder(id);
+  if (!withPix) { remote.status = "created"; remote.transactions.payments = []; }
+  let saved = {
+    id, ownerId, providerId: orderId, providerApi: "orders", plan: "pro", priceCents: 999,
+    jobLimit: 50, status: "pending", createdAt: new Date(), expiresAt: new Date(Date.now() + 1_800_000),
+    approvedAt: null, rejectedAt: null, rejectionReason: null, providerUpdatedAt: null,
+    qrCode: withPix ? "PIX-TEST" : null, qrCodeBase64: null, checkoutUrl: null,
+  } as BillingPayment;
+  const prisma = {
+    $queryRaw: async () => [],
+    billingPayment: {
+      findFirst: async ({ where }: { where: { id: string; ownerId: string } }) =>
+        where.id === saved.id && where.ownerId === saved.ownerId ? saved : null,
+      findUnique: async () => saved,
+      findUniqueOrThrow: async () => saved,
+      update: async ({ data }: { data: Partial<BillingPayment> }) => { saved = { ...saved, ...data }; return saved; },
+    },
+    $transaction: async (callback: (tx: unknown) => unknown): Promise<unknown> => callback(prisma),
+  };
+  const methods: string[] = [];
+  let cancellations = 0;
+  const gateway = createPixGateway(env, async (url, options) => {
+    const path = new URL(String(url)).pathname;
+    assert.equal(new Headers(options?.headers).get("Authorization"), `Bearer ${env.MERCADOPAGO_ACCESS_TOKEN}`);
+    if (path === "/users/me") return Response.json({ id: "123456", tags: ["test_user"], site_id: "MLB" });
+    methods.push(options?.method ?? "GET");
+    if (options?.method === "POST") {
+      assert.equal(path, `/v1/orders/${orderId}/cancel`);
+      assert.equal(new Headers(options.headers).get("X-Idempotency-Key"), `cancel-${orderId}`);
+      cancellations++;
+      if (confirmed) {
+        remote.status = "canceled";
+        remote.status_detail = "canceled_transaction";
+        remote.last_updated_date = new Date(Date.now() + 1).toISOString();
+        for (const transaction of remote.transactions.payments) {
+          transaction.status = "canceled";
+          transaction.status_detail = "canceled_transaction";
+        }
+      }
+      // The POST body is not evidence: the following authenticated GET must agree.
+      return Response.json({ status: "canceled" });
+    }
+    assert.equal(path, `/v1/orders/${orderId}`);
+    return Response.json(remote);
+  });
+  const app = await buildApp({ env, prisma: prisma as unknown as PrismaClient, pixGateway: gateway,
+    logger: false, billingReconciliationEnabled: false });
+  context.after(() => app.close());
+  if (confirmed) {
+    const result = await cancelPayment(app, gateway, ownerId, id);
+    assert.equal(result.status, "cancelled");
+    assert.equal(result.qrCode, null);
+    assert.equal((await cancelPayment(app, gateway, ownerId, id)).status, "cancelled");
+  } else {
+    await assert.rejects(cancelPayment(app, gateway, ownerId, id), (error: { code?: string }) => error.code === "PAYMENT_UNAVAILABLE");
+    assert.equal(saved.status, "pending");
+  }
+  assert.equal(cancellations, 1);
+  assert.deepEqual(methods, ["GET", "POST", "GET"]);
+});
+}
+}
+
+test("legacy Payments cancellation uses PUT and rejects invalid IDs before transport", async () => {
+  let calls = 0;
+  const gateway = createPixGateway(env, async (url, options) => {
+    calls++;
+    assert.equal(String(url), "https://api.mercadopago.com/v1/payments/123456789");
+    assert.equal(options?.method, "PUT");
+    assert.deepEqual(JSON.parse(String(options.body)), { status: "cancelled" });
+    return Response.json({ status: "cancelled" });
+  });
+  await gateway.cancel!("123456789");
+  for (const id of ["../../users/me", "ORD123", "cs_test_12345678"]) await assert.rejects(gateway.cancel!(id));
+  assert.equal(calls, 1);
 });
 
 test("Orders diferencia sandbox do Pix real e aguarda transações assíncronas", () => {

@@ -1,4 +1,4 @@
-import { CheckCircle2, Copy, QrCode, RefreshCw, Wallet } from 'lucide-react'
+import { CheckCircle2, Copy, QrCode, RefreshCw, Wallet, X } from 'lucide-react'
 import { useEffect, useState, type FormEvent } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
-import { useBilling, useBillingPayment, useCreatePayment } from '@/features/billing/billing.queries'
+import { useBilling, useBillingPayment, useCancelPayment, useCreatePayment } from '@/features/billing/billing.queries'
 import { useSession } from '@/features/auth/auth.queries'
 import type { BillingSummary, PaidPlanId, Plan } from '@/features/billing/billing.types'
 import { billingReturnPayment, currentPayment, paymentLabels, paymentRejectionMessage, paymentRetryBlocked, pixCountdown, recoverPaymentAttempt, stripeCheckoutUrl, visiblePaymentStatus } from '@/features/billing/billing.utils'
@@ -133,10 +133,13 @@ export function BillingPage() {
 
       {paymentId && <PixPaymentPanel key={paymentId} id={paymentId} summary={data} onClose={closePayment} />}
 
-      <div className="space-y-5">
+      <div id="billing-plans" className="scroll-mt-24 space-y-5">
         <div><h3 className="text-xl font-bold text-primary">Escolha seu plano</h3><p className="mt-1 text-sm text-muted-foreground">{scheduled ? `Seu próximo período começa em ${nextPurchaseDate}.` : 'Os 30 dias começam quando o pagamento for confirmado.'}</p></div>
         {!data.pixAvailable && <p className="rounded-xl border border-warning/30 bg-warning-soft p-4 text-sm" role="status">O pagamento por Pix está temporariamente indisponível. Você pode continuar usando seu plano atual.</p>}
-        {pendingPayment && <p className="text-sm text-muted-foreground" role="status">Você já tem um Pix em aberto. Conclua esse pagamento ou aguarde a validade antes de comprar outro plano.</p>}
+        {pendingPayment && <div className="space-y-2" role="status">
+          <p className="text-sm text-muted-foreground">Você já tem um Pix em aberto. Para desistir ou escolher outro plano, cancele essa cobrança. Você também pode concluir o pagamento ou aguardar a validade.</p>
+          {paymentId !== pendingPayment.id && <Button size="sm" variant="outline" onClick={() => { closePayment(); setSelectedPaymentId(pendingPayment.id) }}>Ver Pix em aberto</Button>}
+        </div>}
         {retryBlocked && <p className="rounded-xl border border-warning/30 bg-warning-soft p-4 text-sm" role="status">Uma cobrança foi recusada recentemente. Confira os dados do pagador e aguarde {pixCountdown(data.retryAvailableAt!, now)} antes de gerar outro Pix.</p>}
         <PlanCards plans={data.plans} action={(plan) => plan.id === 'free'
           ? <Button className="w-full" variant="outline" disabled>{data.current.planId === 'free' ? 'Seu plano atual' : 'Disponível após o período pago'}</Button>
@@ -169,12 +172,15 @@ export function BillingPage() {
 function PixPaymentPanel({ id, summary, onClose }: { id: string; summary: BillingSummary; onClose: () => void }) {
   const summaryPayment = summary.payments.find((entry) => entry.id === id)
   const query = useBillingPayment(id, summaryPayment)
+  const cancellation = useCancelPayment()
+  const [confirmCancellation, setConfirmCancellation] = useState(false)
   const client = useQueryClient()
   const { copy, copied } = useCopyToClipboard()
   const [now, setNow] = useState(() => Date.now())
   const payment = currentPayment(query.data, summaryPayment)
   const status = payment ? visiblePaymentStatus(payment.status, payment.expiresAt, now) : undefined
   const checkoutUrl = stripeCheckoutUrl(payment?.checkoutUrl)
+  const canCancel = status === 'creating' || status === 'pending'
 
   useEffect(() => {
     if (status !== 'creating' && status !== 'pending') return
@@ -192,17 +198,44 @@ function PixPaymentPanel({ id, summary, onClose }: { id: string; summary: Billin
     catch { toast.error('Não foi possível copiar. Selecione o código abaixo.') }
   }
 
+  async function cancelPayment() {
+    try {
+      const updated = await cancellation.mutateAsync(id)
+      setConfirmCancellation(false)
+      if (updated.status === 'cancelled') toast.success('Cobrança cancelada. Você já pode escolher outro plano.')
+      else if (updated.status === 'approved') toast.info('O pagamento já foi confirmado e não foi cancelado.')
+      else toast.info('O status da cobrança foi atualizado. Confira abaixo.')
+    } catch { /* Keep the dialog open with the API error and allow a safe retry. */ }
+  }
+
   return <Card className="border-success/30" aria-label="Cobrança Pix">
     <CardHeader><h3 className="text-xl font-bold text-primary">{status ? paymentLabels[status] : 'Consultando cobrança...'}</h3>{payment && <p className="text-sm text-muted-foreground">{summary.plans.find((plan) => plan.id === payment.planId)?.name} · {formatCurrency(payment.priceCents)}</p>}</CardHeader>
     <CardContent className="space-y-4">
-      <div role="status" aria-live="polite">{status === 'approved' ? <p className="flex items-start gap-2 font-semibold text-success"><CheckCircle2 className="size-5 shrink-0" aria-hidden="true" />Pagamento confirmado. Consulte acima a validade do período liberado.</p> : status === 'creating' ? <p>Estamos preparando sua cobrança. Ela aparecerá aqui automaticamente.</p> : status === 'pending' ? <p className="text-sm">Escaneie o QR Code no aplicativo do seu banco ou use o Pix Copia e Cola. A confirmação aparecerá automaticamente.</p> : status === 'expired' ? <p className="text-sm">A validade deste Pix terminou. Se você já pagou, atualize a cobrança antes de gerar outro Pix.</p> : status === 'rejected' ? <p className="text-sm">{paymentRejectionMessage(payment?.rejectionReason ?? null)} Nenhum plano foi liberado.</p> : status === 'refunded' ? <p className="text-sm">O período desta cobrança foi desativado após o reembolso. Seu histórico de atendimentos foi preservado.</p> : status ? <p className="text-sm">Esta cobrança não liberou um plano. Você pode escolher uma nova opção acima.</p> : null}</div>
-      {status === 'pending' && checkoutUrl && <div className="space-y-3"><p className="text-sm">O QR Code e o Pix Copia e Cola estão disponíveis no checkout da Stripe. Ao retornar, a confirmação será consultada automaticamente.</p><Button asChild><a href={checkoutUrl} referrerPolicy="no-referrer">Continuar pagamento na Stripe</a></Button></div>}
+      <div role="status" aria-live="polite">{status === 'approved' ? <p className="flex items-start gap-2 font-semibold text-success"><CheckCircle2 className="size-5 shrink-0" aria-hidden="true" />Pagamento confirmado. Consulte acima a validade do período liberado.</p> : status === 'creating' ? <p>Estamos preparando sua cobrança. Ela aparecerá aqui automaticamente.</p> : status === 'pending' ? <p className="text-sm">Escaneie o QR Code no aplicativo do seu banco ou use o Pix Copia e Cola. A confirmação aparecerá automaticamente.</p> : status === 'expired' ? <p className="text-sm">A validade deste Pix terminou. Se você já pagou, atualize a cobrança antes de gerar outro Pix.</p> : status === 'rejected' ? <p className="text-sm">{paymentRejectionMessage(payment?.rejectionReason ?? null)} Nenhum plano foi liberado.</p> : status === 'refunded' ? <p className="text-sm">O período desta cobrança foi desativado após o reembolso. Seu histórico de atendimentos foi preservado.</p> : status === 'cancelled' ? <p className="text-sm">Esta cobrança foi cancelada. Você pode escolher outro plano abaixo.</p> : null}</div>
+      {status === 'pending' && checkoutUrl && <div className="space-y-3"><p className="text-sm">O QR Code e o Pix Copia e Cola estão disponíveis no checkout da Stripe. Ao retornar, a confirmação será consultada automaticamente.</p>{cancellation.isPending ? <Button disabled>Cancelando pagamento...</Button> : <Button asChild><a href={checkoutUrl} referrerPolicy="no-referrer">Continuar pagamento na Stripe</a></Button>}</div>}
       {payment && status === 'pending' && payment.qrCode && <div className="grid items-center gap-5 sm:grid-cols-[12rem_1fr]">
         {payment.qrCodeBase64 && <img src={`data:image/png;base64,${payment.qrCodeBase64}`} alt={`QR Code para pagar ${formatCurrency(payment.priceCents)} via Pix`} width={192} height={192} className="mx-auto rounded-lg border bg-white p-2" />}
-        <div className="min-w-0 space-y-3"><p className="text-sm font-semibold">Validade: <span className="tabular-nums">{pixCountdown(payment.expiresAt, now)}</span></p><Label htmlFor={`pix-code-${id}`}>Pix Copia e Cola</Label><textarea id={`pix-code-${id}`} readOnly value={payment.qrCode} className="min-h-24 w-full resize-none rounded-lg border bg-muted p-3 text-xs break-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onFocus={(event) => event.target.select()} /><Button onClick={() => void copyPix()} className="w-full sm:w-auto"><Copy className="size-4" aria-hidden="true" />{copied ? 'Pix copiado' : 'Copiar código Pix'}</Button></div>
+        <div className="min-w-0 space-y-3"><p className="text-sm font-semibold">Validade: <span className="tabular-nums">{pixCountdown(payment.expiresAt, now)}</span></p><Label htmlFor={`pix-code-${id}`}>Pix Copia e Cola</Label><textarea id={`pix-code-${id}`} readOnly value={payment.qrCode} className="min-h-24 w-full resize-none rounded-lg border bg-muted p-3 text-xs break-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onFocus={(event) => event.target.select()} /><Button disabled={cancellation.isPending} onClick={() => void copyPix()} className="w-full sm:w-auto"><Copy className="size-4" aria-hidden="true" />{copied ? 'Pix copiado' : 'Copiar código Pix'}</Button></div>
       </div>}
       {query.isError && (!status || ['creating', 'pending', 'expired'].includes(status)) && <p className="text-sm text-destructive" role="alert">Não foi possível atualizar a cobrança. Se já pagou, aguarde a confirmação antes de tentar outro pagamento.</p>}
-      <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={query.isFetching} onClick={() => void query.refetch()}><RefreshCw className="size-4" aria-hidden="true" />{query.isFetching ? 'Consultando...' : 'Atualizar pagamento'}</Button>{status === 'approved' && <Button asChild><Link to="/atendimentos">Ir aos atendimentos</Link></Button>}{status && !['creating', 'pending'].includes(status) && <Button variant="ghost" onClick={onClose}>Fechar cobrança</Button>}</div>
+      <div className="flex flex-wrap gap-2">
+        <Button variant="outline" disabled={query.isFetching || cancellation.isPending} onClick={() => void query.refetch()}><RefreshCw className="size-4" aria-hidden="true" />{query.isFetching ? 'Consultando...' : 'Atualizar pagamento'}</Button>
+        {canCancel && <Button variant="outline" className="text-destructive" disabled={cancellation.isPending} onClick={() => { cancellation.reset(); setConfirmCancellation(true) }}><X className="size-4" aria-hidden="true" />Cancelar pagamento</Button>}
+        {status === 'approved' && <Button asChild><Link to="/atendimentos">Ir aos atendimentos</Link></Button>}
+        {status === 'cancelled' && <Button asChild><a href="#billing-plans" onClick={onClose}>Escolher outro plano</a></Button>}
+        {status && !['creating', 'pending'].includes(status) && <Button variant="ghost" onClick={onClose}>Fechar cobrança</Button>}
+      </div>
+      <Dialog open={confirmCancellation} onOpenChange={(open) => { if (!cancellation.isPending) setConfirmCancellation(open) }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Cancelar este pagamento?</DialogTitle><DialogDescription>Vamos encerrar esta cobrança para você desistir ou escolher outro plano. Seu plano atual continua disponível. Se o pagamento já tiver sido confirmado, ele será mantido.</DialogDescription></DialogHeader>
+          {cancellation.isError && <p className="text-sm text-destructive" role="alert">{isServiceError(cancellation.error) ? cancellation.error.message : 'Não foi possível cancelar o pagamento. Atualize a cobrança e tente novamente.'}</p>}
+          {!canCancel && <p className="text-sm" role="status">O status desta cobrança mudou. Feche esta janela e confira o pagamento atualizado.</p>}
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button variant="outline" disabled={cancellation.isPending} onClick={() => setConfirmCancellation(false)}>Voltar</Button>
+            <Button variant="destructive" disabled={!canCancel || cancellation.isPending} onClick={() => void cancelPayment()}>{cancellation.isPending ? 'Cancelando...' : 'Confirmar cancelamento'}</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </CardContent>
   </Card>
 }

@@ -25,6 +25,8 @@ pnpm --filter @extraok/api build
 pnpm --filter @extraok/api start
 ```
 
+Os testes de integração usam exclusivamente `TEST_DATABASE_URL`, que deve apontar para um PostgreSQL isolado com as migrações aplicadas. Os arquivos de teste executam sequencialmente porque a reconciliação de pagamentos consulta uma fila global nesse banco; os cenários de concorrência dentro de cada teste continuam usando requisições simultâneas.
+
 Banco de dados:
 
 ```bash

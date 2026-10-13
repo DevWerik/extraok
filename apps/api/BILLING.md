@@ -72,6 +72,18 @@ Esta configuração dispensa nova migration. Para implantação, publique a API 
 - Reembolso, inclusive parcial, ou reversão confirmada revoga o período dessa cobrança. Períodos posteriores já comprados conservam suas datas; não se apagam atendimentos nem respostas do cliente.
 - Valores de aprovação de extras no dashboard não incluem as compras de plano.
 
+## Cancelar uma cobrança pendente
+
+Em **Meu plano → Ver cobrança → Cancelar pagamento**, o usuário confirma o cancelamento antes de escolher outro plano. A rota `POST /api/v1/billing/payments/:id/cancel` exige sessão, origem autorizada e propriedade da cobrança. O plano já pago permanece disponível; essa ação não solicita reembolso.
+
+- A API consulta o provedor antes da solicitação e novamente depois dela. O estado local só muda para cancelado quando a consulta autenticada confirma o encerramento.
+- Na Stripe, o cancelamento expira a Checkout Session. Uma sessão já concluída com pagamento em processamento pode recusar a expiração; nesse caso a cobrança continua bloqueando nova compra enquanto estiver pendente. [API oficial](https://docs.stripe.com/api/checkout/sessions/expire).
+- No Mercado Pago, Orders usa `POST /v1/orders/{order_id}/cancel`; Payments legado usa `PUT /v1/payments/{id}` com `status=cancelled`. [Referência oficial](https://www.mercadopago.com.br/developers/pt/docs/checkout-api-orders/resources/migrate-payments-to-orders).
+- Se o pagamento for confirmado durante o cancelamento, o servidor preserva a aprovação e concede o período uma única vez. Uma falha de rede sem confirmação mantém a cobrança pendente. Uma criação ainda sem ID do provedor deve terminar antes de ser cancelada.
+- O frontend remove o checkout e o QR depois da confirmação, atualiza o histórico e libera a escolha de outro plano. Respostas antigas de polling não devem substituir o cancelamento confirmado.
+
+Não há nova migration nem variável de ambiente para esse recurso. Os testes de banco em `tests/billing-cancellation.test.ts` cobrem persistência, solicitações simultâneas, preservação do plano ativo e aprovação durante o cancelamento. Usam PostgreSQL isolado e respostas de provedores simuladas; não substituem a homologação nos provedores.
+
 ## Ativar em produção
 
 Antes de ativar, execute na raiz `pnpm.cmd billing:check`. O comando lê as variáveis do terminal e `apps/api/.env`, lista somente os nomes das configurações pendentes e consulta o banco em modo de leitura para conferir as tabelas e as migrations `0003_pix_billing` e `0004_pix_orders`. Não altera dados nem cria cobranças. Código de saída `1` indica pendências. Para verificar o ambiente publicado, execute na raiz do repositório no serviço da API `pnpm --filter @extraok/api exec node dist/scripts/check-billing.js` (ou `node dist/scripts/check-billing.js` se o diretório atual já for `apps/api`); rodar localmente não consulta as variáveis do Render. A validação do token e a entrega do webhook continuam exigindo homologação com o provedor.

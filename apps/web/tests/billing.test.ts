@@ -109,6 +109,20 @@ test('Pix expira mesmo depois de retomar uma aba; confirmação real nunca é su
   assert.equal(visiblePaymentStatus('refunded', expiry, now + 40 * 60_000), 'refunded')
 })
 
+test('cancelamento confirmado prevalece sobre expiração antiga sem esconder aprovação ou reembolso', () => {
+  const cancelled: BillingPayment = { ...payment, status: 'cancelled' }
+  for (const status of ['creating', 'pending', 'expired'] as const) {
+    const stale: BillingPayment = { ...payment, status }
+    assert.equal(currentPayment(stale, cancelled), cancelled)
+    assert.equal(currentPayment(cancelled, stale), cancelled)
+  }
+  for (const status of ['approved', 'refunded'] as const) {
+    const settled: BillingPayment = { ...payment, status }
+    assert.equal(currentPayment(cancelled, settled), settled)
+    assert.equal(currentPayment(settled, cancelled), settled)
+  }
+})
+
 for (const [id, type] of [['12345', 'payment'], ['ORD01HRYFWNYRE1MR1E60MW3X0T2P', 'order'], ['ORDTST01HRYFWNYRE1MR1E60MW3X0T2P', 'order']]) {
 test(`proxy preserva query e assinatura do webhook ${type} sem inventar Origin ou cookie`, async (context) => {
   context.mock.method(globalThis, 'fetch', async (request: Request) => {

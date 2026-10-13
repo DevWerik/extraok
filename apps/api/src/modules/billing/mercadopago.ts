@@ -34,13 +34,14 @@ const paymentSchema = z.object({
 export type PixPayment = Omit<z.infer<typeof paymentSchema>, "live_mode" | "payment_method_id"> & {
   providerApi?: "stripe";
   checkoutUrl?: string | null;
-  // Null is allowed only while Orders is still creating its Pix transaction.
+  // Orders may have no Pix transaction while creating or after cancellation.
   live_mode: boolean | null;
   payment_method_id: string | null;
 };
 export interface PixGateway {
   create(payment: BillingPayment): Promise<PixPayment>;
   get(id: string): Promise<PixPayment>;
+  cancel?(id: string): Promise<void>;
 }
 
 export class PixGatewayError extends AppError {
@@ -142,6 +143,16 @@ export function createPixGateway(env: Env, transport: typeof fetch = fetch): Pix
         if (payment.id !== id) throw new PixGatewayError();
         return payment;
       } catch { throw new PixGatewayError(); }
+    },
+    async cancel(id) {
+      if (!providerResourceIdPattern.test(id)) throw new PixGatewayError();
+      if (orderIdPattern.test(id)) {
+        await request(`/v1/orders/${id.toUpperCase()}/cancel`, {
+          method: "POST", headers: { "X-Idempotency-Key": `cancel-${id.toUpperCase()}` },
+        });
+      } else {
+        await request(`/v1/payments/${id}`, { method: "PUT", body: JSON.stringify({ status: "cancelled" }) });
+      }
     },
   };
 }

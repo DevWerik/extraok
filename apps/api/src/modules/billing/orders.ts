@@ -84,7 +84,11 @@ export function normalizeOrder(data: unknown, account?: OrderAccount): PixPaymen
   const order = orderSchema.parse(data);
   const payment = order.transactions?.payments[0];
   const processing = !payment && ["created", "processing"].includes(order.status);
-  if (!payment && !processing) throw new Error("Missing Pix transaction");
+  const cancelledBeforeTransaction = !payment && order.status === "canceled";
+  if (!payment && !processing && !cancelledBeforeTransaction) throw new Error("Missing Pix transaction");
+  if (cancelledBeforeTransaction && ((order.total_paid_amount ?? 0) !== 0 || order.transactions?.refunds.length)) {
+    throw new Error("Inconsistent canceled order");
+  }
   if (payment && payment.amount !== order.total_amount) throw new Error("Inconsistent order amount");
 
   // Orders does not consistently expose live_mode. The Pix ticket returned by
