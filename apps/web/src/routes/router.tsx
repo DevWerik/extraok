@@ -1,10 +1,11 @@
-import { createBrowserRouter } from 'react-router-dom'
+import { createBrowserRouter, type RouteObject } from 'react-router-dom'
 import { AppShell } from '@/components/layout/app-shell'
 import { GuestRoute } from '@/routes/guest-route'
 import { ProtectedRoute } from '@/routes/protected-route'
 import { RouteError } from '@/routes/route-error'
+import { RouteLoading } from '@/routes/route-loading'
 
-export const router = createBrowserRouter([
+const routes: RouteObject[] = [
   {
     path: '/',
     lazy: async () => {
@@ -132,4 +133,6 @@ export const router = createBrowserRouter([
       return { Component: NotFoundPage }
     },
   },
-])
+]
+
+export const router = createBrowserRouter(routes.map((route) => ({ ...route, HydrateFallback: RouteLoading })))

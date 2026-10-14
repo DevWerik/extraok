@@ -23,6 +23,7 @@ export class ServiceError extends Error {
   readonly status: number
   readonly fields?: Record<string, string[]>
   readonly requestId?: string
+  readonly retryAt?: number
 
   constructor(
     message: string,
@@ -31,6 +32,7 @@ export class ServiceError extends Error {
     options: {
       fields?: Record<string, string[]>
       requestId?: string
+      retryAt?: number
     } = {},
   ) {
     super(message)
@@ -39,6 +41,7 @@ export class ServiceError extends Error {
     this.status = status
     this.fields = options.fields
     this.requestId = options.requestId
+    this.retryAt = options.retryAt
   }
 }
 

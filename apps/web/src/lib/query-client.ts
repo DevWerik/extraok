@@ -1,14 +1,12 @@
 import { QueryClient } from '@tanstack/react-query'
-import { isServiceError } from '@/services/errors'
+import { queryRetryDelay, shouldRetryQuery } from './query-retry'
 
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 30_000,
-      retry: (failureCount, error) => {
-        if (isServiceError(error) && error.status >= 400 && error.status < 500) return false
-        return failureCount < 1
-      },
+      retry: shouldRetryQuery,
+      retryDelay: queryRetryDelay,
       refetchOnWindowFocus: false,
     },
     mutations: {

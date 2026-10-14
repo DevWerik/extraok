@@ -1,7 +1,20 @@
-import { ServiceError, type ServiceErrorCode } from '@/services/errors'
+/// <reference types="vite/client" />
+import { ServiceError, type ServiceErrorCode } from '../services/errors.ts'
 
-const configuredBaseUrl = import.meta.env.VITE_API_URL?.trim()
+const configuredBaseUrl = import.meta.env?.VITE_API_URL?.trim()
 const API_BASE_URL = (configuredBaseUrl || '/api/v1').replace(/\/$/, '')
+const readCooldowns = new Map<string, ServiceError>()
+
+function retryDeadline(response: Response): number | undefined {
+  if (response.status !== 429 && response.status !== 503) return undefined
+  const now = Date.now()
+  const value = response.headers.get('Retry-After')?.trim()
+  if (value) {
+    const deadline = /^\d+$/.test(value) ? now + Number(value) * 1_000 : Date.parse(value)
+    if (Number.isFinite(deadline) && deadline >= now) return deadline
+  }
+  return now + (response.status === 429 ? 30_000 : 15_000)
+}
 
 interface ApiErrorPayload {
   error?: {
@@ -55,6 +68,7 @@ function fallbackMessage(status: number): string {
   if (status === 403) return 'Você não tem permissão para realizar esta ação.'
   if (status === 404) return 'O recurso solicitado não foi encontrado.'
   if (status === 429) return 'Muitas tentativas. Aguarde um momento e tente novamente.'
+  if ([502, 503, 504].includes(status)) return 'O ExtraOK está temporariamente indisponível. Aguarde um momento e tente novamente.'
   return 'Não foi possível concluir a solicitação.'
 }
 
@@ -62,6 +76,19 @@ export async function apiRequest<T>(
   path: string,
   { body, headers, skipAuthRedirect = false, responseType = 'json', ...options }: ApiRequestOptions = {},
 ): Promise<T> {
+  const isRead = !options.method || options.method.toUpperCase() === 'GET'
+  // Share the pause across components that request the same resource, including
+  // remounts and manual refetches. Never replay a mutation automatically.
+  for (const [key, error] of readCooldowns) {
+    if ((error.retryAt ?? 0) <= Date.now()) readCooldowns.delete(key)
+  }
+  const cooldown = isRead ? readCooldowns.get(path) : undefined
+  options.signal?.throwIfAborted()
+  if (cooldown) throw cooldown
+
+  const signal = isRead && responseType === 'json'
+    ? AbortSignal.any([...(options.signal ? [options.signal] : []), AbortSignal.timeout(20_000)])
+    : options.signal
   const requestHeaders = new Headers(headers)
   requestHeaders.set('Accept', responseType === 'blob' ? 'application/pdf, text/csv, application/json' : 'application/json')
   requestHeaders.set('X-Requested-With', 'ExtraOK-Web')
@@ -75,15 +102,19 @@ export async function apiRequest<T>(
   try {
     response = await fetch(`${API_BASE_URL}${path}`, {
       ...options,
+      signal,
       body: body === undefined ? undefined : JSON.stringify(body),
       credentials: 'include',
       headers: requestHeaders,
     })
   } catch (error) {
+    if (options.signal?.aborted) throw error
     if (error instanceof DOMException && error.name === 'AbortError') throw error
 
     throw new ServiceError(
-      'Não foi possível conectar ao ExtraOK. Verifique sua conexão.',
+      signal?.aborted
+        ? 'O ExtraOK demorou para responder. Aguarde um momento e tente novamente.'
+        : 'Não foi possível conectar ao ExtraOK. Verifique sua conexão.',
       'NETWORK_ERROR',
       0,
     )
@@ -93,7 +124,10 @@ export async function apiRequest<T>(
   if (response.ok && responseType === 'blob') return await response.blob() as T
 
   const isJson = response.headers.get('content-type')?.includes('application/json')
-  const payload = isJson ? ((await response.json()) as T | ApiErrorPayload) : undefined
+  const payload = isJson ? ((await response.json().catch((error: unknown) => {
+    if (options.signal?.aborted) throw error
+    return undefined
+  })) as T | ApiErrorPayload | undefined) : undefined
 
   if (!response.ok) {
     const apiError = (payload as ApiErrorPayload | undefined)?.error
@@ -105,14 +139,19 @@ export async function apiRequest<T>(
       window.dispatchEvent(new Event('extraok:unauthorized'))
     }
 
-    throw new ServiceError(
+    const error = new ServiceError(
       apiError?.message || fallbackMessage(response.status),
       code,
       response.status,
-      { fields: apiError?.fields, requestId: apiError?.requestId },
+      { fields: apiError?.fields, requestId: apiError?.requestId, retryAt: retryDeadline(response) },
     )
+    if (isRead && error.retryAt) readCooldowns.set(path, error)
+    throw error
   }
 
+  if (payload === undefined) {
+    throw new ServiceError('O ExtraOK retornou uma resposta inválida. Tente novamente em instantes.', 'INTERNAL_ERROR', response.status)
+  }
   return payload as T
 }
 

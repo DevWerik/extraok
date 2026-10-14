@@ -1,7 +1,7 @@
 import { ShieldCheck } from 'lucide-react'
 import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import { Brand } from '@/components/layout/brand'
-import { Button } from '@/components/ui/button'
+import { QueryRetry } from '@/components/common/query-retry'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useSession } from '@/features/auth/auth.queries'
 
@@ -32,10 +32,9 @@ export function ProtectedRoute() {
             <ShieldCheck className="size-7" />
           </span>
           <h1 className="mt-5 text-2xl font-bold text-primary">Não foi possível validar sua sessão</h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Verifique sua conexão e tente novamente. Nenhum conteúdo privado foi exibido.
-          </p>
-          <Button className="mt-6" onClick={() => session.refetch()}>Tentar novamente</Button>
+          <div className="mt-2">
+            <QueryRetry error={session.error} isFetching={session.isFetching} onRetry={() => void session.refetch()} fallbackMessage="Verifique sua conexão e tente novamente." />
+          </div>
         </div>
       </main>
     )
