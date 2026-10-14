@@ -2,6 +2,7 @@ export type ServiceErrorCode =
   | 'NOT_FOUND'
   | 'CONFLICT'
   | 'VALIDATION'
+  | 'PASSWORD_REUSED'
   | 'FORBIDDEN_OPERATION'
   | 'UNAUTHORIZED'
   | 'FORBIDDEN'

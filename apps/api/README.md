@@ -56,6 +56,16 @@ O acesso do proprietário usa `BILLING_OWNER_USER_ID` somente na API: todos os b
 
 Na raiz, `pnpm.cmd billing:check` identifica configurações pendentes e confere a migration no banco em modo de leitura, sem gerar pagamentos ou exibir credenciais.
 
+## Senhas comuns e reutilização
+
+Cadastro e recuperação exigem de 8 a 12 caracteres e rejeitam senhas comuns, sequências, repetições e variações previsíveis, como `Senha123!` e `P@ssw0rd!`. A API aplica a regra mesmo quando o formulário é contornado. O login continua aceitando as senhas já existentes, incluindo as mais longas.
+
+Na recuperação, a senha candidata é comparada com a senha atual e com todo o histórico disponível **da mesma conta**. São guardados apenas hashes scrypt com salt e pepper, nunca senhas em texto. Uma recusa retorna `400 PASSWORD_REUSED` com `error.fields.password` e preserva a autorização até seu vencimento original, permitindo escolher outra senha sem repetir o OTP. A troca grava o hash anterior e revoga as sessões na mesma transação.
+
+Antes de executar a API atualizada, aplique a migration `0007_password_history` no banco do ambiente correspondente, usando `pnpm.cmd db:migrate:deploy` na raiz. Em produção, esse comando deve executar no processo de implantação da API, com a conexão de migração apropriada. A migration cria uma tabela; a senha atual de cada conta é protegida imediatamente e entra no histórico quando for substituída. Senhas descartadas antes desta implementação não podem ser recuperadas. Excluir a conta também exclui seu histórico.
+
+A lista local de senhas comuns não consulta serviços externos nem cobre todos os vazamentos conhecidos. As cópias em `apps/api/src/lib/password-policy.ts` e `apps/web/src/lib/password-policy.ts` devem ser atualizadas juntas; os testes do frontend verificam ambas com os mesmos casos. O bloqueio de senhas comuns segue a orientação da [OWASP sobre controles de senha](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html#implement-proper-password-strength-controls); o limite de tamanho existente do produto foi preservado.
+
 ## Recuperação de senha por e-mail
 
 A página `/recuperar-senha` solicita um OTP de 8 dígitos, valida o código e permite cadastrar uma nova senha. O envio usa a API HTTPS do Resend pelo `fetch` nativo do Node, com cancelamento após 8 segundos. Nenhuma chave de e-mail é necessária no frontend.

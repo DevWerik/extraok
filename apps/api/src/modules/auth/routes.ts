@@ -3,6 +3,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 import { conflict, unauthorized } from "../../lib/errors.js";
 import { hashPassword, verifyPassword } from "../../lib/password.js";
+import { newPasswordSchema } from "../../lib/new-password-schema.js";
 import { createOpaqueToken, hashToken } from "../../lib/tokens.js";
 import { parseWith } from "../../lib/validation.js";
 import { fullNameSchema } from "../../lib/person-name.js";
@@ -26,7 +27,7 @@ const registerSchema = z.object({
   businessName: z.string().trim().min(2).max(120),
   email: emailSchema,
   phone: z.string().trim().min(10).max(30),
-  password: z.string().min(8, "Use pelo menos 8 caracteres.").max(12, "Use no máximo 12 caracteres."),
+  password: newPasswordSchema,
   acceptTerms: z.literal(true, {
     error: "É necessário aceitar os termos para criar a conta.",
   }),

@@ -77,6 +77,8 @@ Teste cadastro, login, recarregamento mantendo a sessão e logout. Testes locais
 
 A recuperação de senha usa o mesmo proxy e exige a ativação do envio na API. Configure o Resend apenas no backend, seguindo o [guia da API](../api/README.md#recuperação-de-senha-por-e-mail). O código e a nova senha ficam somente na memória da tela durante o fluxo; a autorização temporária usa cookie HttpOnly. Recarregar a página reinicia o formulário. Após a troca, todas as sessões anteriores são encerradas e o usuário volta ao login.
 
+Cadastro e recuperação informam abaixo da senha o limite de 8 a 12 caracteres e recusam senhas comuns ou previsíveis. Na recuperação, a API também recusa a senha atual e senhas anteriores da própria conta. A mensagem aparece no campo e permite tentar outra senha com a mesma autorização, enquanto válida. Veja a [política e a migration necessária](../api/README.md#senhas-comuns-e-reutilização).
+
 `run_worker_first` prioriza o Worker para `/api`, `/api/*`, `/health` e `/ready`. Veja [assets e bindings do Cloudflare](https://developers.cloudflare.com/workers/static-assets/binding/).
 
 ## Alternativa com Docker

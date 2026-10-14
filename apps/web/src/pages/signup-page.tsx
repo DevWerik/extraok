@@ -12,6 +12,7 @@ import { PasswordField } from '@/features/auth/components/password-field'
 import { useSignUp } from '@/features/auth/auth.queries'
 import { signupSchema, type SignupFormData } from '@/features/auth/schemas/auth-schemas'
 import { isServiceError } from '@/services/errors'
+import { newPasswordHint } from '@/lib/password-policy'
 
 export function SignupPage() {
   const navigate = useNavigate()
@@ -19,6 +20,7 @@ export function SignupPage() {
   const {
     register,
     handleSubmit,
+    setError,
     formState: { errors },
   } = useForm<SignupFormData>({
     resolver: zodResolver(signupSchema),
@@ -45,8 +47,10 @@ export function SignupPage() {
       })
       toast.success('Sua conta foi criada com sucesso.')
       navigate('/dashboard', { replace: true })
-    } catch {
-      // The mutation error is rendered below the form.
+    } catch (error) {
+      if (isServiceError(error) && error.fields?.password?.[0]) {
+        setError('password', { type: 'server', message: error.fields.password[0] }, { shouldFocus: true })
+      }
     }
   }
 
@@ -67,7 +71,7 @@ export function SignupPage() {
         <SignupField id="signup-email" label="E-mail" error={errors.email?.message}><Input id="signup-email" type="email" autoComplete="email" aria-invalid={Boolean(errors.email)} placeholder="voce@empresa.com.br" {...register('email')} /></SignupField>
         <SignupField id="signup-phone" label="Telefone" error={errors.phone?.message}><Input id="signup-phone" inputMode="tel" autoComplete="tel" aria-invalid={Boolean(errors.phone)} placeholder="(11) 99999-9999" {...register('phone')} /></SignupField>
         <div className="grid gap-4 sm:grid-cols-2">
-          <PasswordField id="signup-password" label="Senha" autoComplete="new-password" registration={register('password')} error={errors.password?.message} hint="Use de 8 a 12 caracteres." />
+          <PasswordField id="signup-password" label="Senha" autoComplete="new-password" registration={register('password')} error={errors.password?.message} hint={newPasswordHint} />
           <PasswordField id="signup-confirm-password" label="Confirme a senha" autoComplete="new-password" registration={register('confirmPassword')} error={errors.confirmPassword?.message} />
         </div>
         <div>

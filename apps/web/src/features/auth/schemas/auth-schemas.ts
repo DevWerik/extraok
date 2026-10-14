@@ -1,5 +1,6 @@
 import { z } from "zod"
 import { isFullName, normalizeFullName } from '../../../lib/person-name.ts'
+import { commonPasswordMessage, isCommonPassword } from '../../../lib/password-policy.ts'
 
 const emailSchema = z.string().trim().email("Informe um e-mail válido.")
 const loginPasswordSchema = z.string().min(1, "Informe sua senha.").max(128, "Senha inválida.")
@@ -7,6 +8,7 @@ const newPasswordSchema = z
   .string()
   .min(8, "Use pelo menos 8 caracteres.")
   .max(12, "Use no máximo 12 caracteres.")
+  .refine((password) => !isCommonPassword(password), commonPasswordMessage)
 
 export const loginSchema = z.object({
   email: emailSchema,

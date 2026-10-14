@@ -6,7 +6,7 @@ import type { LightMyRequestResponse } from "fastify";
 import { buildApp } from "../src/app.js";
 import { loadEnv } from "../src/config/env.js";
 import { createPrismaClient } from "../src/db/prisma.js";
-import { hashPassword } from "../src/lib/password.js";
+import { hashPassword, verifyPassword } from "../src/lib/password.js";
 import { MailDeliveryError, type PasswordResetMailer } from "../src/lib/password-reset-mailer.js";
 import { createOpaqueToken, hashToken } from "../src/lib/tokens.js";
 import {
@@ -31,7 +31,7 @@ const databaseUrl = process.env.TEST_DATABASE_URL;
 const databaseOptions = { skip: databaseUrl ? false : "TEST_DATABASE_URL não definida" };
 const origin = "https://app.extraok.test";
 const oldPassword = "Senha anterior segura 123!";
-const newPassword = "NovaSenha123";
+const newPassword = "Vento!9Lago";
 type CodeMessage = Parameters<PasswordResetMailer["sendCode"]>[0];
 
 test("OTP usa oito dígitos e HMAC vinculado ao segredo, usuário e desafio", () => {
@@ -187,6 +187,74 @@ test("recuperação completa usa cookie restrito, invalida senha/sessões e envi
   assert.equal(await f.prisma.passwordResetGrant.count({ where: { userId: f.user.id, usedAt: null } }), 0);
 });
 
+async function grantFor(f: Awaited<ReturnType<typeof fixture>>) {
+  const challenge = await f.prisma.passwordResetChallenge.create({ data: {
+    userId: f.user.id, codeHash: "a".repeat(64), verifiedAt: new Date(), expiresAt: new Date(Date.now() + 600_000),
+  } });
+  const token = createOpaqueToken();
+  const grant = await f.prisma.passwordResetGrant.create({ data: {
+    userId: f.user.id, challengeId: challenge.id, tokenHash: hashToken(token), expiresAt: new Date(Date.now() + 300_000),
+  } });
+  return { grant, token, cookie: `extraok_password_reset=${token}` };
+}
+
+test("histórico rejeita senha atual e anteriores sem consumir autorização nem encerrar sessões", databaseOptions, async (context) => {
+  const f = await fixture(context);
+  const firstPassword = "Nuvem!7Mar";
+  const firstHash = await hashPassword(firstPassword, f.env.PASSWORD_PEPPER);
+  await f.prisma.user.update({ where: { id: f.user.id }, data: { passwordHash: firstHash } });
+  const session = await f.prisma.session.create({ data: {
+    userId: f.user.id, tokenHash: hashToken(createOpaqueToken()), expiresAt: new Date(Date.now() + 60_000),
+  } });
+  const first = await grantFor(f);
+  const postPassword = (password: string, cookie: string) => f.post("password-reset/confirm", { password, confirmPassword: password }, cookie);
+  const reused = await postPassword(firstPassword, first.cookie);
+  assert.equal(reused.statusCode, 400, reused.body);
+  assert.equal(reused.json().error.code, "PASSWORD_REUSED");
+  assert.match(reused.json().error.fields.password[0], /já usou esta senha/);
+  assert.equal(reused.headers["set-cookie"], undefined);
+  assert.equal(reused.body.includes(firstHash), false);
+  assert.equal(reused.body.includes(firstPassword), false);
+  assert.equal((await f.prisma.passwordResetGrant.findUniqueOrThrow({ where: { id: first.grant.id } })).usedAt, null);
+  assert.equal((await f.prisma.session.findUniqueOrThrow({ where: { id: session.id } })).revokedAt, null);
+  assert.equal(await f.prisma.passwordHistory.count({ where: { userId: f.user.id } }), 0);
+  assert.equal(await f.prisma.passwordResetDelivery.count({ where: { userId: f.user.id, kind: "changed" } }), 0);
+  assert.equal((await postPassword("Senha123!", first.cookie)).statusCode, 400);
+
+  assert.equal((await postPassword(newPassword, first.cookie)).statusCode, 204);
+  const stored = await f.prisma.passwordHistory.findMany({ where: { userId: f.user.id } });
+  assert.equal(stored.length, 1);
+  assert.equal(stored[0]!.passwordHash, firstHash);
+  assert.ok((await f.prisma.session.findUniqueOrThrow({ where: { id: session.id } })).revokedAt);
+
+  const second = await grantFor(f);
+  const historical = await postPassword(firstPassword, second.cookie);
+  assert.equal(historical.json().error.code, "PASSWORD_REUSED", historical.body);
+  assert.equal((await postPassword("Pedra!8Sol", second.cookie)).statusCode, 204);
+
+  const third = await grantFor(f);
+  for (const password of [firstPassword, newPassword, "Pedra!8Sol"]) {
+    const response = await postPassword(password, third.cookie);
+    assert.equal(response.json().error.code, "PASSWORD_REUSED", response.body);
+  }
+  assert.equal(await f.prisma.passwordHistory.count({ where: { userId: f.user.id } }), 2);
+  const user = await f.prisma.user.findUniqueOrThrow({ where: { id: f.user.id } });
+  assert.equal(await verifyPassword("Pedra!8Sol", user.passwordHash, f.env.PASSWORD_PEPPER), true);
+  await f.prisma.user.delete({ where: { id: f.user.id } });
+  assert.equal(await f.prisma.passwordHistory.count({ where: { userId: f.user.id } }), 0);
+});
+
+test("histórico é restrito à própria conta, inclusive para senhas aposentadas de outra pessoa", databaseOptions, async (context) => {
+  const first = await fixture(context);
+  const other = await fixture(context);
+  const otherHash = await hashPassword(newPassword, first.env.PASSWORD_PEPPER);
+  await other.prisma.passwordHistory.create({ data: { userId: other.user.id, passwordHash: otherHash } });
+  const grant = await grantFor(first);
+  assert.equal(await confirmPasswordReset(first.app, grant.token, newPassword), true);
+  assert.equal(await first.prisma.passwordHistory.count({ where: { userId: first.user.id } }), 1);
+  assert.equal(await other.prisma.passwordHistory.count({ where: { userId: other.user.id } }), 1);
+});
+
 test("expiração e reenvio invalidam código e autorização anteriores", databaseOptions, async (context) => {
   const f = await fixture(context);
   await requestPasswordReset(f.app, f.email);
@@ -278,6 +346,7 @@ test("concorrência permite um desafio, uma validação e um consumo por recuper
   const grant = grants[0]!;
   const confirms = await Promise.all(Array.from({ length: 3 }, () => confirmPasswordReset(f.app, grant.token, newPassword)));
   assert.equal(confirms.filter(Boolean).length, 1);
+  assert.equal(await f.prisma.passwordHistory.count({ where: { userId: f.user.id } }), 1);
   assert.equal(await f.prisma.passwordResetDelivery.count({ where: { userId: f.user.id, kind: "changed" } }), 1);
 });
 

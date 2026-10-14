@@ -29,6 +29,7 @@ import {
 } from '@/features/auth/schemas/auth-schemas'
 import type { PasswordResetRequestResult } from '@/services/contracts'
 import { isServiceError } from '@/services/errors'
+import { newPasswordHint } from '@/lib/password-policy'
 
 type RecoveryState =
   | { step: 'email'; email: string }
@@ -249,7 +250,7 @@ function NewPasswordForm({ expiresAt, onRestart }: { expiresAt: number; onRestar
   const navigate = useNavigate()
   const confirmPassword = useConfirmPasswordReset()
   const expiresIn = useCountdown(expiresAt)
-  const { register, handleSubmit, reset, setFocus, formState: { errors } } = useForm<PasswordResetConfirmFormData>({
+  const { register, handleSubmit, reset, setFocus, setError, formState: { errors } } = useForm<PasswordResetConfirmFormData>({
     resolver: zodResolver(passwordResetConfirmSchema),
     defaultValues: { password: '', confirmPassword: '' },
   })
@@ -263,8 +264,10 @@ function NewPasswordForm({ expiresAt, onRestart }: { expiresAt: number; onRestar
       reset()
       confirmPassword.reset()
       navigate('/login?passwordReset=success', { replace: true })
-    } catch {
-      // The API also checks expiration and use of the temporary authorization.
+    } catch (error) {
+      if (isServiceError(error) && error.fields?.password?.[0]) {
+        setError('password', { type: 'server', message: error.fields.password[0] }, { shouldFocus: true })
+      }
     }
   }
 
@@ -273,7 +276,7 @@ function NewPasswordForm({ expiresAt, onRestart }: { expiresAt: number; onRestar
       <form className="space-y-5" onSubmit={handleSubmit(onSubmit)} noValidate>
         <fieldset disabled={confirmPassword.isPending || expiresIn === 0} className="space-y-5">
           <legend className="sr-only">Escolha sua nova senha</legend>
-          <PasswordField id="recovery-password" label="Nova senha" autoComplete="new-password" registration={register('password')} error={errors.password?.message} hint="Use de 8 a 12 caracteres." />
+          <PasswordField id="recovery-password" label="Nova senha" autoComplete="new-password" registration={register('password')} error={errors.password?.message} hint={`${newPasswordHint} Escolha uma senha que você ainda não usou nesta conta.`} />
           <PasswordField id="recovery-confirm-password" label="Confirme a nova senha" autoComplete="new-password" registration={register('confirmPassword')} error={errors.confirmPassword?.message} />
           <p className="text-sm text-muted-foreground">Após a alteração, entre novamente com a nova senha em todos os seus dispositivos.</p>
           <Button type="submit" size="lg" className="w-full" disabled={confirmPassword.isPending || expiresIn === 0}>{confirmPassword.isPending ? 'Salvando nova senha...' : 'Salvar nova senha'}</Button>

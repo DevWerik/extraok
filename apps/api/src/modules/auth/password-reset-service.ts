@@ -2,7 +2,10 @@ import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 
 import type { Prisma } from "../../generated/prisma/client.js";
-import { hashPassword } from "../../lib/password.js";
+import { AppError } from "../../lib/errors.js";
+import { hashPassword, verifyPassword } from "../../lib/password.js";
+import { newPasswordSchema } from "../../lib/new-password-schema.js";
+import { parseWith } from "../../lib/validation.js";
 import { createOpaqueToken, hashToken } from "../../lib/tokens.js";
 import {
   encryptPasswordResetCode,
@@ -191,19 +194,48 @@ export async function confirmPasswordReset(
   const tokenHash = hashToken(token);
   const initial = await app.prisma.passwordResetGrant.findUnique({ where: { tokenHash } });
   if (!initial || initial.usedAt || initial.expiresAt.getTime() <= Date.now()) return false;
-  const passwordHash = await hashPassword(password, app.env.PASSWORD_PEPPER);
+  parseWith(newPasswordSchema, password);
+  const user = await app.prisma.user.findUnique({
+    where: { id: initial.userId },
+    select: { passwordHash: true, passwordHistory: { select: { passwordHash: true } } },
+  });
+  if (!user) return false;
+
+  // Scrypt comparisons run sequentially, outside the transaction, to bound
+  // memory use and avoid holding database locks throughout a long history.
+  let reused = false;
+  for (const previous of [user, ...user.passwordHistory]) {
+    if (await verifyPassword(password, previous.passwordHash, app.env.PASSWORD_PEPPER)) {
+      reused = true;
+      break;
+    }
+  }
+  const passwordHash = reused ? null : await hashPassword(password, app.env.PASSWORD_PEPPER);
 
   return app.prisma.$transaction(async (transaction) => {
     await lockPasswordResetAccount(transaction, initial.userId);
     // Login locks this same row and checks the password hash before issuing a
     // session, so an in-flight login with the old password cannot survive reset.
-    await transaction.$queryRaw`SELECT id FROM users WHERE id = ${initial.userId}::uuid FOR UPDATE`;
+    const lockedUsers = await transaction.$queryRaw<Array<{ password_hash: string }>>`
+      SELECT password_hash FROM users WHERE id = ${initial.userId}::uuid FOR UPDATE
+    `;
+    // A concurrent reset invalidates the snapshot checked above and its grant.
+    if (lockedUsers[0]?.password_hash !== user.passwordHash) return false;
     const now = new Date();
     const consumed = await transaction.passwordResetGrant.updateMany({
       where: { id: initial.id, tokenHash, usedAt: null, expiresAt: { gt: now } },
       data: { usedAt: now },
     });
     if (consumed.count !== 1) return false;
+    if (reused || !passwordHash) {
+      const message = "Você já usou esta senha nesta conta. Escolha uma senha diferente das anteriores.";
+      // Throwing rolls back grant consumption, allowing another password with
+      // the same verified authorization until its original expiration.
+      throw new AppError(400, "PASSWORD_REUSED", message, { password: [message] });
+    }
+    await transaction.passwordHistory.create({
+      data: { userId: initial.userId, passwordHash: user.passwordHash },
+    });
     await transaction.user.update({ where: { id: initial.userId }, data: { passwordHash } });
     await transaction.session.updateMany({
       where: { userId: initial.userId, revokedAt: null },

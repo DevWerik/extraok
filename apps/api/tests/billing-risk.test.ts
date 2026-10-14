@@ -91,7 +91,7 @@ test("HTTP valida nome completo no cadastro antes de acessar o banco", async (co
   context.after(() => app.close());
   for (const [name, valid] of [["Pessoa", false], ["Pessoa 123", false], ["João da Silva", true], ["Ana-Maria D’Ávila", true]] as const) {
     const result = await app.inject({ method: "POST", url: "/api/v1/auth/register", headers: { origin },
-      payload: { name, email: "payer@example.test", businessName: "Teste", phone: "11999999999", password: "Password123", acceptTerms: true } });
+      payload: { name, email: "payer@example.test", businessName: "Teste", phone: "11999999999", password: "Vento!9Lago", acceptTerms: true } });
     assert.equal(result.statusCode, valid ? 409 : 400, result.body);
     if (!valid) assert.ok(result.json().error.fields.name);
   }

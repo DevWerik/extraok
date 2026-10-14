@@ -40,14 +40,14 @@ test('signup and recovery enforce 8–12 characters and matching confirmation', 
   }
   for (const schema of [signupSchema, passwordResetConfirmSchema]) {
     for (const length of [8, 11, 12]) {
-      const password = 'a'.repeat(length)
+      const password = 'R7!mP2#vQ9$x'.slice(0, length)
       assert.equal(schema.safeParse({ ...signupFields, password, confirmPassword: password }).success, true)
     }
     for (const length of [0, 7, 13, 128, 129]) {
       const password = 'a'.repeat(length)
       assert.equal(schema.safeParse({ ...signupFields, password, confirmPassword: password }).success, false)
     }
-    const mismatch = schema.safeParse({ ...signupFields, password: 'Senha123', confirmPassword: 'Senha456' })
+    const mismatch = schema.safeParse({ ...signupFields, password: 'Vento!9Lago', confirmPassword: 'Nuvem!7Mar' })
     assert.equal(mismatch.success, false)
     if (!mismatch.success) assert.deepEqual(mismatch.error.issues[0].path, ['confirmPassword'])
   }

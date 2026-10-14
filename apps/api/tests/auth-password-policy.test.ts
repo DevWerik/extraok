@@ -31,7 +31,7 @@ test("cadastro e recuperação aceitam senhas de 8 a 12 caracteres na validaçã
   context.after(() => app.close());
 
   for (const length of [0, 7, 8, 11, 12, 13, 128, 129]) {
-    const password = "a".repeat(length);
+    const password = "R7!mP2#vQ9$x".repeat(11).slice(0, length);
     const validLength = length >= 8 && length <= 12;
     const registration = await app.inject({
       method: "POST", url: "/api/v1/auth/register", headers: { origin },
@@ -58,4 +58,31 @@ test("cadastro e recuperação aceitam senhas de 8 a 12 caracteres na validaçã
     }
   }
   assert.equal(userLookups, 3);
+});
+
+test("cadastro e recuperação rejeitam senhas comuns antes de consultar contas", async (context) => {
+  const prisma = {} as PrismaClient;
+  const env = loadEnv({
+    NODE_ENV: "test", DATABASE_URL: "postgresql://test:test@127.0.0.1:1/unused",
+    WEB_ORIGIN: origin, PASSWORD_PEPPER: "password-policy-test-pepper-at-least-32-characters",
+    PASSWORD_RESET_ENABLED: "true", PASSWORD_RESET_OTP_SECRET: "password-policy-test-otp-secret-at-least-32-characters",
+    RESEND_API_KEY: "re_unit_test_placeholder", EMAIL_FROM: "ExtraOK <seguranca@example.test>",
+  });
+  const app = await buildApp({ env, prisma, logger: false, passwordResetDeliveryEnabled: false });
+  context.after(() => app.close());
+  for (const [index, password] of ["12345678", "1234567890", "Password1!", "P@ssw0rd!", "Senha123!", "Extraok2026", "aaaaaaaa", "abcdabcd", "qwertyui", "87654321"].entries()) {
+    for (const path of ["register", "password-reset/confirm"]) {
+      const response = await app.inject({
+        method: "POST", url: `/api/v1/auth/${path}`, headers: { origin },
+        remoteAddress: `127.0.0.${index + 1}`,
+        payload: {
+          name: "Pessoa Teste", businessName: "Negócio Teste", email: "pessoa@example.test",
+          phone: "11999999999", acceptTerms: true, password, confirmPassword: password,
+        },
+      });
+      assert.equal(response.statusCode, 400, response.body);
+      assert.match(response.json().error.fields.password[0], /comum ou previsível/);
+      assert.equal(response.body.includes(password), false);
+    }
+  }
 });

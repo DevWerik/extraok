@@ -4,6 +4,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 
 import { AppError, badRequest } from "../../lib/errors.js";
+import { newPasswordSchema } from "../../lib/new-password-schema.js";
 import type { PasswordResetMailer } from "../../lib/password-reset-mailer.js";
 import { parseWith } from "../../lib/validation.js";
 import { clearSessionCookie } from "../../plugins/auth.js";
@@ -21,7 +22,7 @@ const emailSchema = z.string().trim().toLowerCase().max(320).pipe(z.email("Infor
 const requestSchema = z.object({ email: emailSchema });
 const verifySchema = z.object({ email: emailSchema, code: z.string().regex(/^\d{8}$/, "Informe o código de 8 dígitos.") });
 const confirmSchema = z.object({
-  password: z.string().min(8, "Use no mínimo 8 caracteres.").max(12, "Use no máximo 12 caracteres."),
+  password: newPasswordSchema,
   confirmPassword: z.string().min(1).max(12, "Use no máximo 12 caracteres."),
 }).refine((input) => input.password === input.confirmPassword, {
   path: ["confirmPassword"], message: "As senhas devem ser iguais.",
