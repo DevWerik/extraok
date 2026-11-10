@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { BrandLogo } from "@/features/landing/components/brand-logo"
 
 const navigationItems = [
+  { href: "#ia-na-pratica", label: "IA integrada" },
   { href: "#como-funciona", label: "Como funciona" },
   { href: "#beneficios", label: "Benefícios" },
   { href: "#exemplo", label: "Exemplo" },
