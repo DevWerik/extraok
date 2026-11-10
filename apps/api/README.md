@@ -15,6 +15,8 @@ As demais variáveis possuem valores de desenvolvimento documentados no exemplo.
 
 ## Comandos
 
+A geração e melhoria de descrições com Gemini é opcional e começa desativada. Veja [configuração, limites e validação da IA](GEMINI.md).
+
 Execute preferencialmente a partir da raiz do monorepo:
 
 ```bash
