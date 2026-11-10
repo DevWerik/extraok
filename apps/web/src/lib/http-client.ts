@@ -29,6 +29,7 @@ interface ApiRequestOptions extends Omit<RequestInit, 'body'> {
   body?: unknown
   skipAuthRedirect?: boolean
   responseType?: 'json' | 'blob'
+  timeoutMs?: number
 }
 
 const serviceErrorCodes = new Set<ServiceErrorCode>([
@@ -64,18 +65,18 @@ function fallbackCode(status: number): ServiceErrorCode {
   return 'INTERNAL_ERROR'
 }
 
-function fallbackMessage(status: number): string {
+function fallbackMessage(status: number, isJson: boolean): string {
   if (status === 401) return 'Sua sessão expirou. Entre novamente.'
   if (status === 403) return 'Você não tem permissão para realizar esta ação.'
   if (status === 404) return 'O recurso solicitado não foi encontrado.'
-  if (status === 429) return 'Muitas tentativas. Aguarde um momento e tente novamente.'
-  if ([502, 503, 504].includes(status)) return 'O ExtraOK está temporariamente indisponível. Aguarde um momento e tente novamente.'
+  if (status === 429 && isJson) return 'Muitas tentativas. Aguarde um momento e tente novamente.'
+  if ([429, 502, 503, 504].includes(status)) return 'O ExtraOK está temporariamente indisponível. Aguarde um momento e tente novamente.'
   return 'Não foi possível concluir a solicitação.'
 }
 
 export async function apiRequest<T>(
   path: string,
-  { body, headers, skipAuthRedirect = false, responseType = 'json', ...options }: ApiRequestOptions = {},
+  { body, headers, skipAuthRedirect = false, responseType = 'json', timeoutMs, ...options }: ApiRequestOptions = {},
 ): Promise<T> {
   const isRead = !options.method || options.method.toUpperCase() === 'GET'
   // Share the pause across components that request the same resource, including
@@ -87,8 +88,9 @@ export async function apiRequest<T>(
   options.signal?.throwIfAborted()
   if (cooldown) throw cooldown
 
-  const signal = isRead && responseType === 'json'
-    ? AbortSignal.any([...(options.signal ? [options.signal] : []), AbortSignal.timeout(20_000)])
+  const requestTimeout = timeoutMs ?? (isRead && responseType === 'json' ? 20_000 : undefined)
+  const signal = requestTimeout !== undefined
+    ? AbortSignal.any([...(options.signal ? [options.signal] : []), AbortSignal.timeout(requestTimeout)])
     : options.signal
   const requestHeaders = new Headers(headers)
   requestHeaders.set('Accept', responseType === 'blob' ? 'application/pdf, text/csv, application/json' : 'application/json')
@@ -124,9 +126,12 @@ export async function apiRequest<T>(
   if (response.status === 204) return undefined as T
   if (response.ok && responseType === 'blob') return await response.blob() as T
 
-  const isJson = response.headers.get('content-type')?.includes('application/json')
+  const isJson = response.headers.get('content-type')?.includes('application/json') === true
   const payload = isJson ? ((await response.json().catch((error: unknown) => {
     if (options.signal?.aborted) throw error
+    if (response.ok && signal?.aborted) {
+      throw new ServiceError('O ExtraOK demorou para responder. Aguarde um momento e tente novamente.', 'NETWORK_ERROR', 0)
+    }
     return undefined
   })) as T | ApiErrorPayload | undefined) : undefined
 
@@ -141,7 +146,7 @@ export async function apiRequest<T>(
     }
 
     const error = new ServiceError(
-      apiError?.message || fallbackMessage(response.status),
+      apiError?.message || fallbackMessage(response.status, isJson),
       code,
       response.status,
       { fields: apiError?.fields, requestId: apiError?.requestId, retryAt: retryDeadline(response) },

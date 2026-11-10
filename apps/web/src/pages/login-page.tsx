@@ -12,6 +12,7 @@ import { PasswordField } from '@/features/auth/components/password-field'
 import { useSignIn } from '@/features/auth/auth.queries'
 import { loginSchema, type LoginFormData } from '@/features/auth/schemas/auth-schemas'
 import { isServiceError } from '@/services/errors'
+import { useRetryCountdown } from '@/lib/use-retry-countdown'
 
 const JOB_DETAILS_PATH = /^\/atendimentos\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const PRIVATE_PATHS = new Set([
@@ -45,6 +46,8 @@ export function LoginPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const signIn = useSignIn()
+  const retryAt = isServiceError(signIn.error) ? signIn.error.retryAt ?? 0 : 0
+  const retryIn = useRetryCountdown(retryAt)
   const {
     register,
     handleSubmit,
@@ -55,6 +58,7 @@ export function LoginPage() {
   })
 
   async function onSubmit(values: LoginFormData) {
+    if (signIn.isPending || retryIn > 0) return
     try {
       await signIn.mutateAsync(values)
       toast.success('Bem-vindo de volta ao ExtraOK.')
@@ -92,9 +96,9 @@ export function LoginPage() {
           </Link>
         </div>
         {signIn.isError && <FormFeedback tone="error" message={isServiceError(signIn.error) ? signIn.error.message : 'Não foi possível entrar na sua conta.'} />}
-        <Button type="submit" size="lg" className="w-full" disabled={signIn.isPending}>
-          {signIn.isPending ? 'Entrando...' : 'Entrar'}
-          {!signIn.isPending && <ArrowRight className="size-4" />}
+        <Button type="submit" size="lg" className="w-full" disabled={signIn.isPending || retryIn > 0}>
+          {signIn.isPending ? 'Entrando...' : retryIn > 0 ? `Tentar novamente em ${retryIn}s` : 'Entrar'}
+          {!signIn.isPending && retryIn === 0 && <ArrowRight className="size-4" />}
         </Button>
       </form>
     </AuthLayout>

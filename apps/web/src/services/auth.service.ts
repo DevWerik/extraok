@@ -1,7 +1,7 @@
-import { apiRequest } from '@/lib/http-client'
+import { apiRequest } from '../lib/http-client.ts'
 import type { Session } from '@/types/domain'
 import type { AuthService, PasswordResetRequestResult, PasswordResetVerifyResult } from './contracts'
-import { isServiceError } from './errors'
+import { isServiceError } from './errors.ts'
 
 export const authService: AuthService = {
   async getSession(options) {
@@ -21,6 +21,7 @@ export const authService: AuthService = {
       method: 'POST',
       body: input,
       skipAuthRedirect: true,
+      timeoutMs: 20_000,
     })
   },
 

@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { useRetryCountdown } from '@/lib/use-retry-countdown'
 import { isServiceError } from '@/services/errors'
 
 interface QueryRetryProps {
@@ -10,20 +10,8 @@ interface QueryRetryProps {
 }
 
 export function QueryRetry({ error, isFetching, onRetry, fallbackMessage }: QueryRetryProps) {
-  const [now, setNow] = useState(() => Date.now())
   const retryAt = isServiceError(error) ? error.retryAt ?? 0 : 0
-  const seconds = Math.max(0, Math.ceil((retryAt - now) / 1_000))
-
-  useEffect(() => {
-    if (!retryAt) return
-    const update = () => setNow(Date.now())
-    const timer = window.setInterval(update, 1_000)
-    document.addEventListener('visibilitychange', update)
-    return () => {
-      window.clearInterval(timer)
-      document.removeEventListener('visibilitychange', update)
-    }
-  }, [retryAt])
+  const seconds = useRetryCountdown(retryAt)
 
   return (
     <div>
