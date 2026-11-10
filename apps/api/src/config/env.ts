@@ -63,6 +63,10 @@ export const envSchema = z
     PASSWORD_PEPPER: z.string().min(32),
     PASSWORD_RESET_ENABLED: booleanFromEnvironment.default(false),
     PASSWORD_RESET_OTP_SECRET: optionalSetting,
+    AI_ENABLED: booleanFromEnvironment.default(false),
+    GEMINI_API_KEY: optionalSetting,
+    GEMINI_MODEL: z.string().trim().regex(/^gemini-[a-zA-Z0-9.-]+$/).max(100).default("gemini-3.8-flash"),
+    AI_DAILY_LIMIT: z.coerce.number().int().min(1).max(1_000).default(20),
     RESEND_API_KEY: optionalSetting,
     EMAIL_FROM: optionalSetting,
     BILLING_ENABLED: booleanFromEnvironment.default(false),
@@ -92,6 +96,9 @@ export const envSchema = z
     TRUST_PROXY: booleanFromEnvironment.default(false),
   })
   .superRefine((environment, context) => {
+    if (environment.AI_ENABLED && !environment.GEMINI_API_KEY) {
+      context.addIssue({ code: "custom", path: ["GEMINI_API_KEY"], message: "Configure a chave do Gemini para ativar a geração de descrições." });
+    }
     if (environment.BILLING_ENABLED && environment.BILLING_PROVIDER === "stripe") {
       const mode = environment.STRIPE_LIVE_MODE ? "live" : "test";
       if (!new RegExp(`^(?:sk|rk)_${mode}_[A-Za-z0-9]{16,}$`).test(environment.STRIPE_SECRET_KEY ?? "")) {

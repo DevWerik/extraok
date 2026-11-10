@@ -4,6 +4,8 @@ import { loadEnv, type Env } from "./config/env.js";
 import { createPrismaClient } from "./db/prisma.js";
 import { registerErrorHandler } from "./http/error-handler.js";
 import { registerApprovalRoutes } from "./modules/approvals/routes.js";
+import { createGeminiDescriptionGenerator, type DescriptionGenerator } from "./modules/ai/gemini.js";
+import { registerAiRoutes } from "./modules/ai/routes.js";
 import { registerAuthRoutes } from "./modules/auth/routes.js";
 import { registerPasswordResetRoutes } from "./modules/auth/password-reset-routes.js";
 import { createPasswordResetMailer, type PasswordResetMailer } from "./lib/password-reset-mailer.js";
@@ -26,6 +28,7 @@ export interface BuildAppOptions {
   passwordResetDeliveryEnabled?: boolean;
   pixGateway?: PixGateway;
   billingReconciliationEnabled?: boolean;
+  descriptionGenerator?: DescriptionGenerator;
 }
 
 export async function buildApp(
@@ -118,6 +121,7 @@ export async function buildApp(
       await registerClientRoutes(api);
       await registerJobRoutes(api);
       await registerExtraRoutes(api);
+      await registerAiRoutes(api, options.descriptionGenerator ?? createGeminiDescriptionGenerator(env));
       await registerDashboardRoutes(api);
       await registerReportRoutes(api);
       await registerApprovalRoutes(api);
