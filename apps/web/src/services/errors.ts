@@ -9,6 +9,7 @@ export type ServiceErrorCode =
   | 'RATE_LIMITED'
   | 'NETWORK_ERROR'
   | 'INTERNAL_ERROR'
+  | 'AI_UNAVAILABLE'
   | 'GONE'
   | 'PLAN_LIMIT_REACHED'
   | 'PLAN_FEATURE_REQUIRED'

@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { extraSchema, type ExtraFormValues } from '@/features/extras/extra.schema'
+import { DescriptionAssistant } from './description-assistant'
 
 interface ExtraFormProps {
   formId: string
@@ -20,6 +21,8 @@ export function ExtraForm({ formId, initialValues, disabled = false, onSubmit }:
     register,
     control,
     reset,
+    setValue,
+    setFocus,
     handleSubmit,
     formState: { errors },
   } = useForm<ExtraFormValues>({
@@ -27,17 +30,21 @@ export function ExtraForm({ formId, initialValues, disabled = false, onSubmit }:
     defaultValues: initialValues ?? emptyValues,
   })
   const description = useWatch({ control, name: 'description' }) ?? ''
+  const title = useWatch({ control, name: 'title' }) ?? ''
   const descriptionMaxLength = extraSchema.shape.description.maxLength ?? undefined
+  const initialTitle = initialValues?.title ?? ''
+  const initialDescription = initialValues?.description ?? ''
+  const initialPrice = initialValues?.price ?? ''
 
   useEffect(() => {
-    reset(initialValues ?? emptyValues)
-  }, [initialValues, reset])
+    reset({ title: initialTitle, description: initialDescription, price: initialPrice })
+  }, [initialTitle, initialDescription, initialPrice, reset])
 
   return (
     <form id={formId} className="space-y-4" onSubmit={handleSubmit(onSubmit)} noValidate>
       <div className="space-y-2">
         <Label htmlFor={`${formId}-title`}>Título do extra</Label>
-        <Input id={`${formId}-title`} placeholder="Ex.: Higienização completa" aria-invalid={Boolean(errors.title)} aria-describedby={`${formId}-title-help${errors.title ? ` ${formId}-title-error` : ''}`} disabled={disabled} {...register('title')} />
+        <Input id={`${formId}-title`} maxLength={160} placeholder="Ex.: Higienização completa" aria-invalid={Boolean(errors.title)} aria-describedby={`${formId}-title-help${errors.title ? ` ${formId}-title-error` : ''}`} disabled={disabled} {...register('title')} />
         <p id={`${formId}-title-help`} className="text-xs text-muted-foreground">Máximo de 160 caracteres.</p>
         {errors.title && <p id={`${formId}-title-error`} className="text-xs font-medium text-destructive">{errors.title.message}</p>}
       </div>
@@ -49,6 +56,10 @@ export function ExtraForm({ formId, initialValues, disabled = false, onSubmit }:
           <span className="tabular-nums">{description.length.toLocaleString('pt-BR')} / {descriptionMaxLength?.toLocaleString('pt-BR')} caracteres</span>
         </p>
         {errors.description && <p id={`${formId}-description-error`} className="text-xs font-medium text-destructive">{errors.description.message}</p>}
+        <DescriptionAssistant title={title} description={description} disabled={disabled} onApply={(value) => {
+          setValue('description', value, { shouldDirty: true, shouldValidate: true })
+          setFocus('description')
+        }} />
       </div>
       <div className="space-y-2">
         <Label htmlFor={`${formId}-price`}>Valor</Label>

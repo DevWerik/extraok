@@ -307,7 +307,7 @@ export function JobDetailsPage() {
         contentClassName="md:max-w-xl max-h-[92svh]"
         footer={<><Button variant="outline" onClick={() => setSurfaceOpen(false)} disabled={isSaving}>Cancelar</Button><Button type="submit" form={formId} disabled={isSaving}>{isSaving ? 'Salvando...' : 'Salvar extra'}</Button></>}
       >
-        <ExtraForm formId={formId} disabled={isSaving} initialValues={editingExtra ? { title: editingExtra.title, description: editingExtra.description, price: centsToCurrencyInput(editingExtra.priceCents) } : undefined} onSubmit={handleSave} />
+        <ExtraForm key={editingExtra?.id ?? 'new'} formId={formId} disabled={isSaving} initialValues={editingExtra ? { title: editingExtra.title, description: editingExtra.description, price: centsToCurrencyInput(editingExtra.priceCents) } : undefined} onSubmit={handleSave} />
       </ResponsiveFormSurface>
 
       <Dialog open={Boolean(deletingExtra)} onOpenChange={(open) => !open && setDeletingExtra(null)}>
