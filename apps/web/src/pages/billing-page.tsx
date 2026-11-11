@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
+import { QueryRetry } from '@/components/common/query-retry'
 import { useBilling, useBillingPayment, useCancelPayment, useCreatePayment } from '@/features/billing/billing.queries'
 import { useSession } from '@/features/auth/auth.queries'
 import type { BillingSummary, PaidPlanId, Plan } from '@/features/billing/billing.types'
@@ -19,6 +20,7 @@ import { OwnerAccessPanel } from '@/features/billing/owner-access-panel'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { formatCurrency, formatDateTime } from '@/lib/formatters'
 import { queryKeys } from '@/lib/query-keys'
+import { canRefreshQuery } from '@/lib/query-retry'
 import { isServiceError } from '@/services/errors'
 import { isFullName, normalizeFullName } from '@/lib/person-name'
 import { prepareMercadoPagoDeviceId } from '@/lib/mercadopago-device'
@@ -65,7 +67,7 @@ export function BillingPage() {
   }
 
   function choosePlan(plan: Plan) {
-    if (billing.data?.current.billingExempt || retryBlocked) return
+    if (billing.isError || billing.data?.current.billingExempt || retryBlocked) return
     purchase.reset()
     setCpf('')
     setPayerName(session.data?.user.name ?? '')
@@ -75,7 +77,7 @@ export function BillingPage() {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!selection || selection.plan.id === 'free' || busy || billing.data?.current.billingExempt || retryBlocked) return
+    if (!selection || selection.plan.id === 'free' || busy || billing.isError || billing.data?.current.billingExempt || retryBlocked) return
     setPreparationError('')
     if (stripeCheckout) {
       try {
@@ -109,9 +111,10 @@ export function BillingPage() {
   }
 
   if (billing.isPending) return <div role="status" aria-label="Carregando seu plano" className="space-y-6"><Skeleton className="h-40 rounded-xl" /><div className="grid gap-5 md:grid-cols-3">{[1, 2, 3].map((id) => <Skeleton key={id} className="h-96 rounded-xl" />)}</div></div>
-  if (!billing.data) return <section className="rounded-xl border bg-card p-8 text-center" role="alert"><h2 className="text-xl font-bold">Não foi possível consultar seu plano</h2><p className="mt-2 text-muted-foreground">Verifique sua conexão e tente novamente.</p><Button className="mt-4" onClick={() => void billing.refetch()}>Tentar novamente</Button></section>
+  const billingRetry = billing.isError && <div className="rounded-xl border bg-card p-5" role="alert"><QueryRetry error={billing.error} isFetching={billing.isFetching} onRetry={() => void billing.refetch()} fallbackMessage="Não foi possível atualizar seu plano." /></div>
+  if (!billing.data) return <section className="rounded-xl border bg-card p-8 text-center" role="alert"><h2 className="mb-3 text-xl font-bold">Não foi possível consultar seu plano</h2>{billingRetry}</section>
   const data = billing.data
-  if (data.current.billingExempt) return <OwnerAccessPanel summary={data} />
+  if (data.current.billingExempt) return <div className="space-y-5">{billingRetry}<OwnerAccessPanel summary={data} /></div>
   const currentName = data.plans.find((plan) => plan.id === data.current.planId)?.name ?? 'Gratuito'
   const nextPurchaseDate = data.nextPurchaseStartsAt ? formatDateTime(data.nextPurchaseStartsAt) : null
   const scheduled = Boolean(nextPurchaseDate && (data.current.planId !== 'free' || data.upcoming.length > 0))
@@ -119,6 +122,7 @@ export function BillingPage() {
   return (
     <section aria-labelledby="billing-heading" className="space-y-8">
       <div><h2 id="billing-heading" className="text-2xl font-extrabold tracking-tight text-primary sm:text-3xl">Seu trabalho, no seu ritmo</h2><p className="mt-2 max-w-3xl text-sm text-muted-foreground">Acompanhe seu limite e escolha o próximo plano. Os pagamentos são feitos somente por Pix, com renovação manual.</p></div>
+      {billingRetry}
 
       <Card className="border-success/25 bg-success-soft/30">
         <CardContent className="grid gap-6 md:grid-cols-[1fr_1fr]">
@@ -143,7 +147,7 @@ export function BillingPage() {
         {retryBlocked && <p className="rounded-xl border border-warning/30 bg-warning-soft p-4 text-sm" role="status">Uma cobrança foi recusada recentemente. Confira os dados do pagador e aguarde {pixCountdown(data.retryAvailableAt!, now)} antes de gerar outro Pix.</p>}
         <PlanCards plans={data.plans} action={(plan) => plan.id === 'free'
           ? <Button className="w-full" variant="outline" disabled>{data.current.planId === 'free' ? 'Seu plano atual' : 'Disponível após o período pago'}</Button>
-          : <Button className="w-full" variant={plan.id === 'pro' ? 'default' : 'outline'} disabled={!data.pixAvailable || Boolean(pendingPayment) || retryBlocked} onClick={() => choosePlan(plan)}><QrCode className="size-4" aria-hidden="true" />{scheduled ? `Renovar com ${plan.name}` : `Ativar ${plan.name}`}</Button>} />
+          : <Button className="w-full" variant={plan.id === 'pro' ? 'default' : 'outline'} disabled={billing.isError || !data.pixAvailable || Boolean(pendingPayment) || retryBlocked} onClick={() => choosePlan(plan)}><QrCode className="size-4" aria-hidden="true" />{scheduled ? `Renovar com ${plan.name}` : `Ativar ${plan.name}`}</Button>} />
         <p className="text-sm leading-relaxed text-muted-foreground">O limite é consumido apenas no primeiro link de cada atendimento. Reenvios, substituições do link e extras do mesmo atendimento não consomem outra unidade. O saldo não acumula entre períodos. No Gratuito, o mês segue o horário de Brasília.</p>
       </div>
 
@@ -161,7 +165,7 @@ export function BillingPage() {
             <p id="billing-payer-help" className="text-xs text-muted-foreground">Confira o nome completo como consta no documento. O nome, o CPF e o e-mail devem identificar o pagador. A correção do nome vale para esta cobrança.</p>
             </>}
             <div id="billing-form-error" role="alert">{preparationError ? <p className="text-sm text-destructive">{preparationError}</p> : purchase.isError && <p className="text-sm text-destructive">{isServiceError(purchase.error) ? purchase.error.message : 'Não foi possível gerar o Pix. Tente novamente.'}</p>}</div>
-            <Button type="submit" className="w-full" disabled={busy || retryBlocked || (!stripeCheckout && (!isFullName(payerName) || !session.data?.user.email || cpf.replace(/\D/g, '').length !== 11))}><QrCode className="size-4" aria-hidden="true" />{busy ? 'Preparando pagamento...' : stripeCheckout ? 'Continuar para pagar com Pix' : `Gerar Pix de ${selection ? formatCurrency(selection.plan.priceCents) : ''}`}</Button>
+            <Button type="submit" className="w-full" disabled={busy || billing.isError || retryBlocked || (!stripeCheckout && (!isFullName(payerName) || !session.data?.user.email || cpf.replace(/\D/g, '').length !== 11))}><QrCode className="size-4" aria-hidden="true" />{busy ? 'Preparando pagamento...' : stripeCheckout ? 'Continuar para pagar com Pix' : `Gerar Pix de ${selection ? formatCurrency(selection.plan.priceCents) : ''}`}</Button>
           </form>
         </DialogContent>
       </Dialog>
@@ -189,7 +193,7 @@ function PixPaymentPanel({ id, summary, onClose }: { id: string; summary: Billin
   }, [status])
   useEffect(() => {
     if (!status || status === 'creating' || status === 'pending') return
-    void client.invalidateQueries({ queryKey: queryKeys.billing.summary })
+    void client.invalidateQueries({ queryKey: queryKeys.billing.summary, predicate: canRefreshQuery })
   }, [status, client])
 
   async function copyPix() {
@@ -218,8 +222,9 @@ function PixPaymentPanel({ id, summary, onClose }: { id: string; summary: Billin
         <div className="min-w-0 space-y-3"><p className="text-sm font-semibold">Validade: <span className="tabular-nums">{pixCountdown(payment.expiresAt, now)}</span></p><Label htmlFor={`pix-code-${id}`}>Pix Copia e Cola</Label><textarea id={`pix-code-${id}`} readOnly value={payment.qrCode} className="min-h-24 w-full resize-none rounded-lg border bg-muted p-3 text-xs break-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onFocus={(event) => event.target.select()} /><Button disabled={cancellation.isPending} onClick={() => void copyPix()} className="w-full sm:w-auto"><Copy className="size-4" aria-hidden="true" />{copied ? 'Pix copiado' : 'Copiar código Pix'}</Button></div>
       </div>}
       {query.isError && (!status || ['creating', 'pending', 'expired'].includes(status)) && <p className="text-sm text-destructive" role="alert">Não foi possível atualizar a cobrança. Se já pagou, aguarde a confirmação antes de tentar outro pagamento.</p>}
+      {query.isError && <QueryRetry error={query.error} isFetching={query.isFetching || cancellation.isPending} onRetry={() => void query.refetch()} fallbackMessage="Não foi possível atualizar a cobrança." />}
       <div className="flex flex-wrap gap-2">
-        <Button variant="outline" disabled={query.isFetching || cancellation.isPending} onClick={() => void query.refetch()}><RefreshCw className="size-4" aria-hidden="true" />{query.isFetching ? 'Consultando...' : 'Atualizar pagamento'}</Button>
+        {!query.isError && <Button variant="outline" disabled={query.isFetching || cancellation.isPending} onClick={() => void query.refetch()}><RefreshCw className="size-4" aria-hidden="true" />{query.isFetching ? 'Consultando...' : 'Atualizar pagamento'}</Button>}
         {canCancel && <Button variant="outline" className="text-destructive" disabled={cancellation.isPending} onClick={() => { cancellation.reset(); setConfirmCancellation(true) }}><X className="size-4" aria-hidden="true" />Cancelar pagamento</Button>}
         {status === 'approved' && <Button asChild><Link to="/atendimentos">Ir aos atendimentos</Link></Button>}
         {status === 'cancelled' && <Button asChild><a href="#billing-plans" onClick={onClose}>Escolher outro plano</a></Button>}

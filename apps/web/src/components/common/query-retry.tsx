@@ -18,6 +18,7 @@ export function QueryRetry({ error, isFetching, onRetry, fallbackMessage }: Quer
       <p className="text-sm text-muted-foreground" role="status">
         {isServiceError(error) ? error.message : fallbackMessage}
       </p>
+      <p className="mt-2 text-sm text-muted-foreground">A nova tentativa só será feita quando você clicar no botão abaixo.</p>
       <Button variant="outline" className="mt-3" disabled={isFetching || seconds > 0} onClick={onRetry}>
         {isFetching ? 'Tentando novamente…' : seconds > 0 ? `Tentar novamente em ${seconds}s` : 'Tentar novamente'}
       </Button>

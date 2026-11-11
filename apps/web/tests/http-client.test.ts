@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { apiRequest } from '../src/lib/http-client.ts'
-import { queryRetryDelay, shouldRetryQuery } from '../src/lib/query-retry.ts'
 import { ServiceError } from '../src/services/errors.ts'
 import { authService } from '../src/services/auth.service.ts'
 
-test('503 vazio da hospedagem recebe mensagem de indisponibilidade e pausa antes de uma única repetição', async (t) => {
+test('503 vazio da hospedagem recebe mensagem de indisponibilidade e pausa antes de nova tentativa manual', async (t) => {
   t.mock.timers.enable({ apis: ['Date'], now: 1_800_000_000_000 })
   const fetchMock = t.mock.method(globalThis, 'fetch', async () => new Response(null, { status: 503 }))
   let failure: ServiceError | undefined
@@ -15,9 +14,6 @@ test('503 vazio da hospedagem recebe mensagem de indisponibilidade e pausa antes
     assert.equal(error.status, 503)
     assert.match(error.message, /temporariamente indisponível/)
     assert.equal(error.retryAt, Date.now() + 15_000)
-    assert.equal(queryRetryDelay(0, error), 15_000)
-    assert.equal(shouldRetryQuery(0, error), true)
-    assert.equal(shouldRetryQuery(1, error), false)
     return true
   })
   await assert.rejects(apiRequest('/test/plans-unavailable'), (error: unknown) => error === failure)
@@ -38,7 +34,6 @@ test('429 respeita Retry-After, bloqueia novas consultas ao mesmo recurso e não
     failure = error
     assert.equal(error.retryAt, Date.now() + 45_000)
     assert.equal(error.code, 'RATE_LIMITED')
-    assert.equal(shouldRetryQuery(0, error), false)
     return true
   })
   t.mock.timers.tick(44_999)
@@ -58,7 +53,6 @@ test('Retry-After aceita data HTTP e preserva o status com JSON inválido', asyn
     assert.ok(error instanceof ServiceError)
     assert.equal(error.status, 503)
     assert.equal(error.retryAt, Date.now() + 120_000)
-    assert.equal(shouldRetryQuery(0, error), false)
     return true
   })
 })
@@ -90,7 +84,6 @@ test('429 HTML da hospedagem informa indisponibilidade sem culpar o usuário e p
     assert.match(error.message, /temporariamente indisponível/)
     assert.doesNotMatch(error.message, /Muitas tentativas|Just a moment/)
     assert.equal(error.retryAt, Date.now() + 30_000)
-    assert.equal(shouldRetryQuery(0, error), false)
     return true
   })
   await assert.rejects(apiRequest('/test/plans-hosting-limited'), (error: unknown) => error === failure)
@@ -203,7 +196,6 @@ test('401 continua identificável como sessão ausente e sucesso sem JSON não v
   await assert.rejects(apiRequest('/test/session-anonymous', { skipAuthRedirect: true }), (error: unknown) => {
     assert.ok(error instanceof ServiceError)
     assert.equal(error.code, 'UNAUTHORIZED')
-    assert.equal(shouldRetryQuery(0, error), false)
     return true
   })
   t.mock.method(globalThis, 'fetch', async () => new Response('<html>Unavailable</html>'))

@@ -1,18 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { queryKeys } from '@/lib/query-keys'
+import { canRefreshQuery } from '@/lib/query-retry'
 import { billingService } from '@/services/billing.service'
 import type { BillingPayment, BillingSummary } from './billing.types'
 import { currentPayment } from './billing.utils'
 
-export function usePlans() {
-  return useQuery({ queryKey: queryKeys.billing.plans, queryFn: ({ signal }) => billingService.plans(signal) })
-}
 export function useBilling() {
   return useQuery({
     queryKey: queryKeys.billing.summary,
     queryFn: ({ signal }) => billingService.summary(signal),
-    refetchInterval: 30_000,
-    refetchOnWindowFocus: true,
+    refetchInterval: (query) => canRefreshQuery(query) ? 30_000 : false,
+    refetchOnWindowFocus: canRefreshQuery,
   })
 }
 export function useBillingPayment(id: string | null, summaryPayment?: BillingPayment) {
@@ -20,8 +18,8 @@ export function useBillingPayment(id: string | null, summaryPayment?: BillingPay
     queryKey: queryKeys.billing.payment(id ?? ''),
     queryFn: ({ signal }) => billingService.payment(id!, signal),
     enabled: Boolean(id), staleTime: 0, gcTime: 0,
-    refetchOnWindowFocus: true,
-    refetchInterval: (query) => ['creating', 'pending'].includes(currentPayment(query.state.data, summaryPayment)?.status ?? '') ? 5_000 : false,
+    refetchOnWindowFocus: canRefreshQuery,
+    refetchInterval: (query) => canRefreshQuery(query) && ['creating', 'pending'].includes(currentPayment(query.state.data, summaryPayment)?.status ?? '') ? 5_000 : false,
   })
 }
 export function useCreatePayment() {

@@ -6,7 +6,6 @@ export const queryKeys = {
   },
   billing: {
     all: ['billing'] as const,
-    plans: ['billing', 'plans'] as const,
     summary: ['billing', 'summary'] as const,
     payment: (id: string) => ['billing', 'payment', id] as const,
   },
