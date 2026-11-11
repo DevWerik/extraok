@@ -30,6 +30,7 @@ export async function configureSecurity(
     },
     methods: ["GET", "HEAD", "POST", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Accept", "X-Requested-With"],
+    exposedHeaders: ["Retry-After"],
     maxAge: 600,
   });
   await app.register(rateLimit, {

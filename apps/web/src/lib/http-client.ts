@@ -3,7 +3,7 @@ import { ServiceError, type ServiceErrorCode } from '../services/errors.ts'
 
 const configuredBaseUrl = import.meta.env?.VITE_API_URL?.trim()
 const API_BASE_URL = (configuredBaseUrl || '/api/v1').replace(/\/$/, '')
-const readCooldowns = new Map<string, ServiceError>()
+const requestCooldowns = new Map<string, ServiceError>()
 
 function retryDeadline(response: Response): number | undefined {
   if (response.status !== 429 && response.status !== 503) return undefined
@@ -79,12 +79,13 @@ export async function apiRequest<T>(
   { body, headers, skipAuthRedirect = false, responseType = 'json', timeoutMs, ...options }: ApiRequestOptions = {},
 ): Promise<T> {
   const isRead = !options.method || options.method.toUpperCase() === 'GET'
-  // Share the pause across components that request the same resource, including
-  // remounts and manual refetches. Never replay a mutation automatically.
-  for (const [key, error] of readCooldowns) {
-    if ((error.retryAt ?? 0) <= Date.now()) readCooldowns.delete(key)
+  // Respect the server pause across remounts, including login submissions.
+  // Expiry only permits a later request; it never schedules one.
+  const cooldownKey = `${options.method?.toUpperCase() ?? 'GET'} ${path}`
+  for (const [key, error] of requestCooldowns) {
+    if ((error.retryAt ?? 0) <= Date.now()) requestCooldowns.delete(key)
   }
-  const cooldown = isRead ? readCooldowns.get(path) : undefined
+  const cooldown = requestCooldowns.get(cooldownKey)
   options.signal?.throwIfAborted()
   if (cooldown) throw cooldown
 
@@ -151,7 +152,7 @@ export async function apiRequest<T>(
       response.status,
       { fields: apiError?.fields, requestId: apiError?.requestId, retryAt: retryDeadline(response) },
     )
-    if (isRead && error.retryAt) readCooldowns.set(path, error)
+    if (error.retryAt) requestCooldowns.set(cooldownKey, error)
     throw error
   }
 

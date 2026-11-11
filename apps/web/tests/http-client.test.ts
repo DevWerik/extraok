@@ -190,6 +190,12 @@ test('login preserva Retry-After para bloquear novas tentativas até o prazo do 
     return true
   })
   assert.equal(fetchMock.mock.callCount(), 1)
+  await assert.rejects(authService.signIn({ email: 'person@example.com', password: 'test-password' }), ServiceError)
+  assert.equal(fetchMock.mock.callCount(), 1)
+  t.mock.timers.tick(900_000)
+  assert.equal(fetchMock.mock.callCount(), 1, 'o fim da espera não envia as credenciais')
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ user: { id: 'test-user' } }))
+  assert.deepEqual(await authService.signIn({ email: 'person@example.com', password: 'test-password' }), { user: { id: 'test-user' } })
 })
 
 test('401 continua identificável como sessão ausente e sucesso sem JSON não vira catálogo vazio', async (t) => {

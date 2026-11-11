@@ -1,6 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { ArrowRight, Mail } from 'lucide-react'
 import { useForm } from 'react-hook-form'
+import { useRef } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { AuthLayout } from '@/components/layout/auth-layout'
@@ -46,6 +47,7 @@ export function LoginPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const signIn = useSignIn()
+  const submitting = useRef(false)
   const retryAt = isServiceError(signIn.error) ? signIn.error.retryAt ?? 0 : 0
   const retryIn = useRetryCountdown(retryAt)
   const {
@@ -58,13 +60,16 @@ export function LoginPage() {
   })
 
   async function onSubmit(values: LoginFormData) {
-    if (signIn.isPending || retryIn > 0) return
+    if (submitting.current || signIn.isPending || retryAt > Date.now()) return
+    submitting.current = true
     try {
       await signIn.mutateAsync(values)
       toast.success('Bem-vindo de volta ao ExtraOK.')
       navigate(safeLoginDestination(searchParams.get('from')), { replace: true })
     } catch {
       // The mutation error is rendered below the form.
+    } finally {
+      submitting.current = false
     }
   }
 
@@ -77,7 +82,7 @@ export function LoginPage() {
       alternateLinkLabel="Criar conta"
       alternateLinkTo="/cadastro"
     >
-      <form className="space-y-5" onSubmit={handleSubmit(onSubmit)} noValidate>
+      <form className="space-y-5" onSubmit={(event) => void handleSubmit(onSubmit)(event)} noValidate>
         {searchParams.get('passwordReset') === 'success' && (
           <FormFeedback tone="success" message="Senha alterada com sucesso. Entre com sua nova senha." />
         )}
@@ -96,8 +101,9 @@ export function LoginPage() {
           </Link>
         </div>
         {signIn.isError && <FormFeedback tone="error" message={isServiceError(signIn.error) ? signIn.error.message : 'Não foi possível entrar na sua conta.'} />}
+        {signIn.isError && <p className="text-sm text-muted-foreground">A nova tentativa só será feita quando você clicar em Tentar novamente.</p>}
         <Button type="submit" size="lg" className="w-full" disabled={signIn.isPending || retryIn > 0}>
-          {signIn.isPending ? 'Entrando...' : retryIn > 0 ? `Tentar novamente em ${retryIn}s` : 'Entrar'}
+          {signIn.isPending ? 'Entrando...' : retryIn > 0 ? `Tentar novamente em ${retryIn}s` : signIn.isError ? 'Tentar novamente' : 'Entrar'}
           {!signIn.isPending && retryIn === 0 && <ArrowRight className="size-4" />}
         </Button>
       </form>
