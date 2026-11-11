@@ -12,7 +12,7 @@ const descriptions: Record<PlanId, string> = {
   business: 'Acompanhe seus resultados com filtros e exporte seus relatórios.',
 }
 
-export function PlanCards({ plans, action }: { plans: Plan[]; action: (plan: Plan) => ReactNode }) {
+export function PlanCards({ plans, action }: { plans: readonly Plan[]; action: (plan: Plan) => ReactNode }) {
   return (
     <div className="grid gap-5 md:grid-cols-3">
       {plans.map((plan) => (

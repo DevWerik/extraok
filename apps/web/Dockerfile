@@ -21,6 +21,7 @@ RUN --mount=type=cache,id=extraok-pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile --filter @extraok/web...
 
 COPY apps/web apps/web
+COPY apps/api/src/modules/billing/catalog.ts apps/api/src/modules/billing/catalog.ts
 
 RUN pnpm --filter @extraok/web build
 
